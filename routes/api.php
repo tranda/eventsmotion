@@ -16,6 +16,7 @@ use App\Http\Controllers\API\QrCodeController;
 use App\Http\Controllers\API\FileController;
 use App\Http\Controllers\API\PublicController;
 use App\Http\Controllers\API\ApiKeyController;
+use App\Http\Controllers\API\PasswordResetController;
 
 /*
 |--------------------------------------------------------------------------
@@ -30,6 +31,10 @@ use App\Http\Controllers\API\ApiKeyController;
 
 Route::post('login', [AuthController::class, 'authenticate']);
 Route::middleware('auth:sanctum')->post('logout', [AuthController::class, 'logout']);
+
+// Password Reset Routes
+Route::post('forgot-password', [PasswordResetController::class, 'forgotPassword']);
+Route::post('reset-password', [PasswordResetController::class, 'resetPassword']);
 // Route::post('register', [UserController::class, 'register']);
 Route::middleware('auth:sanctum')->get('users', [UserController::class, 'getUsers']);
 Route::middleware('auth:sanctum')->get('users/{userId}', [UserController::class, 'getUser']);
