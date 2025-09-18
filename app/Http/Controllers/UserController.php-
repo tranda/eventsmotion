@@ -1,0 +1,43 @@
+<?php
+
+namespace App\Http\Controllers;
+use App\Http\Controllers\API\BaseController as BaseController;
+
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Auth;
+use App\Models\User;
+use Illuminate\Support\Facades\Log;
+
+class UserController extends BaseController
+{
+    //
+	public function showRegistrationForm()
+	{
+		return view('auth.register');
+	}
+
+	public function register(Request $request)
+	{
+		$validator = Validator::make($request->all(), [
+			'name' => 'required|string|max:255',
+			'email' => 'required|string|email|max:255|unique:users',
+			'password' => 'required|string|min:8|confirmed',
+		]);
+		
+		if ($validator->fails()) {
+			return parent::sendError('Failed to register', $validator->errors(), 201);
+		}
+
+		$user = new User;
+		$user->name = $request->name;
+		$user->email = $request->email;
+		$user->password = bcrypt($request->password);
+		$user->save();
+
+		Auth::login($user);
+
+		return parent::sendResponse($user, 'Successfull registration');
+	}
+
+}

@@ -1,0 +1,164 @@
+{
+  "success": true,
+  "data": {
+    "event": {
+      "id": 1,
+      "name": "EuroCup Paddling Championship 2024",
+      "location": "Vienna, Austria",
+      "year": 2024,
+      "status": "ACTIVE"
+    },
+    "race_results": [
+      {
+        "id": 1,
+        "race_number": 1,
+        "title": "Men's K1 500m",
+        "stage": "Finals",
+        "status": "FINISHED",
+        "race_time": "2024-07-15T10:30:00",
+        "discipline": {
+          "id": 1,
+          "distance": 500,
+          "age_group": "Senior",
+          "gender_group": "M",
+          "boat_group": "K1",
+          "display_name": "Men's K1 500m"
+        },
+        "crew_results": [
+          {
+            "id": 1,
+            "lane": 1,
+            "position": 1,
+            "time_ms": 125000,
+            "formatted_time": "02:05.000",
+            "delay_after_first": null,
+            "status": "FINISHED",
+            "crew": {
+              "id": 1,
+              "team": {
+                "id": 1,
+                "name": "Team Austria"
+              }
+            }
+          },
+          {
+            "id": 2,
+            "lane": 2,
+            "position": 2,
+            "time_ms": 127500,
+            "formatted_time": "02:07.500",
+            "delay_after_first": "00:02.500",
+            "status": "FINISHED",
+            "crew": {
+              "id": 2,
+              "team": {
+                "id": 2,
+                "name": "Team Germany"
+              }
+            }
+          },
+          {
+            "id": 3,
+            "lane": 3,
+            "position": 3,
+            "time_ms": 130200,
+            "formatted_time": "02:10.200",
+            "delay_after_first": "00:05.200",
+            "status": "FINISHED",
+            "crew": {
+              "id": 3,
+              "team": {
+                "id": 3,
+                "name": "Team France"
+              }
+            }
+          },
+          {
+            "id": 4,
+            "lane": 4,
+            "position": null,
+            "time_ms": null,
+            "formatted_time": null,
+            "delay_after_first": null,
+            "status": "DNF",
+            "crew": {
+              "id": 4,
+              "team": {
+                "id": 4,
+                "name": "Team Italy"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "race_number": 2,
+        "title": "Women's K1 500m",
+        "stage": "Finals",
+        "status": "FINISHED",
+        "race_time": "2024-07-15T11:00:00",
+        "discipline": {
+          "id": 2,
+          "distance": 500,
+          "age_group": "Senior",
+          "gender_group": "W",
+          "boat_group": "K1",
+          "display_name": "Women's K1 500m"
+        },
+        "crew_results": [
+          {
+            "id": 5,
+            "lane": 1,
+            "position": 1,
+            "time_ms": 135000,
+            "formatted_time": "02:15.000",
+            "delay_after_first": null,
+            "status": "FINISHED",
+            "crew": {
+              "id": 5,
+              "team": {
+                "id": 5,
+                "name": "Team Hungary"
+              }
+            }
+          },
+          {
+            "id": 6,
+            "lane": 2,
+            "position": 2,
+            "time_ms": 137800,
+            "formatted_time": "02:17.800",
+            "delay_after_first": "00:02.800",
+            "status": "FINISHED",
+            "crew": {
+              "id": 6,
+              "team": {
+                "id": 6,
+                "name": "Team Poland"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "race_number": 3,
+        "title": "Men's K2 1000m",
+        "stage": "Semi-Finals",
+        "status": "SCHEDULED",
+        "race_time": "2024-07-15T14:30:00",
+        "discipline": {
+          "id": 3,
+          "distance": 1000,
+          "age_group": "Senior",
+          "gender_group": "M",
+          "boat_group": "K2",
+          "display_name": "Men's K2 1000m"
+        },
+        "crew_results": []
+      }
+    ]
+  },
+  "message": "Public race results retrieved successfully"
+}
