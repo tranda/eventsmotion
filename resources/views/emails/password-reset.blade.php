@@ -57,14 +57,14 @@
 </head>
 <body>
     <div class="header">
-        <h1>EuroCup Events Platform</h1>
+        <h1>Events Platform</h1>
         <h2>Password Reset Request</h2>
     </div>
 
     <div class="content">
         <p>Hello {{ $userName }},</p>
 
-        <p>We received a request to reset your password for your EuroCup Events account. If you made this request, click the button below to reset your password:</p>
+        <p>We received a request to reset your password for your Events Platform account. If you made this request, click the button below to reset your password:</p>
 
         <div style="text-align: center;">
             <a href="{{ $resetUrl }}" class="button">Reset My Password</a>
@@ -82,7 +82,7 @@
         <p>If you didn't request a password reset, you can safely ignore this email. Your password will remain unchanged.</p>
 
         <div class="footer">
-            <p>This is an automated email from the EuroCup Events Platform. Please do not reply to this email.</p>
+            <p>This is an automated email from the Events Platform. Please do not reply to this email.</p>
             <p>If you're having trouble with the reset process, please contact support.</p>
         </div>
     </div>
