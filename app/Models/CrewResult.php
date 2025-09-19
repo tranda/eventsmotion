@@ -121,4 +121,43 @@ class CrewResult extends Model
     {
         return $this->time_ms ? $this->time_ms / 1000 : null;
     }
+
+    /**
+     * Get formatted final time as string (MM:SS.mmm).
+     * This is used for multi-round races to display the accumulated time.
+     */
+    public function getFormattedFinalTimeAttribute()
+    {
+        if (!isset($this->final_time_ms) || !$this->final_time_ms) return null;
+
+        $totalMs = $this->final_time_ms;
+        $minutes = floor($totalMs / 60000);
+        $seconds = floor(($totalMs % 60000) / 1000);
+        $milliseconds = $totalMs % 1000;
+
+        return sprintf('%02d:%02d.%03d', $minutes, $seconds, $milliseconds);
+    }
+
+    /**
+     * Get final time in seconds (for calculations).
+     */
+    public function getFinalTimeInSecondsAttribute()
+    {
+        return isset($this->final_time_ms) && $this->final_time_ms ? $this->final_time_ms / 1000 : null;
+    }
+
+    /**
+     * Static method to format time from milliseconds.
+     * Useful for formatting times without a model instance.
+     */
+    public static function formatTimeFromMs($timeMs)
+    {
+        if (!$timeMs) return null;
+
+        $minutes = floor($timeMs / 60000);
+        $seconds = floor(($timeMs % 60000) / 1000);
+        $milliseconds = $timeMs % 1000;
+
+        return sprintf('%02d:%02d.%03d', $minutes, $seconds, $milliseconds);
+    }
 }

@@ -44,17 +44,15 @@ class RaceResultController extends BaseController
                     ->get();
             }
             
-            // Debug logging
-            foreach ($raceResults as $race) {
-                \Log::info("Race {$race->race_number}: " . $race->crewResults->count() . " crew results");
-                foreach ($race->crewResults as $crewResult) {
-                    \Log::info("  Crew ID: {$crewResult->crew_id}, Team ID: {$crewResult->crew?->team_id}, Team Name: {$crewResult->crew?->team?->name}");
-                }
-            }
+            // Enhance race results with final round information
+            $enhancedRaceResults = $raceResults->map(function($raceResult) {
+                $raceResult->is_final_round = $raceResult->isFinalRound();
+                return $raceResult;
+            });
 
             return response()->json([
                 'success' => true,
-                'data' => $raceResults,
+                'data' => $enhancedRaceResults,
                 'message' => 'Race results retrieved successfully'
             ], 200);
 
@@ -66,7 +64,8 @@ class RaceResultController extends BaseController
     /**
      * Get a specific race result with ALL registered crews.
      * Includes crews that haven't completed results yet.
-     * 
+     * For final rounds, includes accumulated times and final rankings.
+     *
      * @param int $id
      * @return \Illuminate\Http\JsonResponse
      */
@@ -82,8 +81,12 @@ class RaceResultController extends BaseController
             // Get all crew results (including crews without results)
             $allCrewResults = $raceResult->allCrewResults();
 
-            // Add the crew results to the race result object
-            $raceResult->crew_results = $allCrewResults;
+            // Enhance crew results with formatted times and positions for final rounds
+            $enhancedCrewResults = $this->enhanceCrewResultsForResponse($allCrewResults, $raceResult);
+
+            // Add enhanced data to the race result object
+            $raceResult->crew_results = $enhancedCrewResults;
+            $raceResult->is_final_round = $raceResult->isFinalRound();
 
             return response()->json([
                 'success' => true,
@@ -203,7 +206,8 @@ class RaceResultController extends BaseController
     /**
      * Get crew results for a specific race.
      * Includes ALL registered crews, even those without results.
-     * 
+     * For final rounds, includes accumulated times and final rankings.
+     *
      * @param int $raceResultId
      * @return \Illuminate\Http\JsonResponse
      */
@@ -219,9 +223,13 @@ class RaceResultController extends BaseController
             // Get all crew results (including crews without results)
             $allCrewResults = $raceResult->allCrewResults();
 
+            // Enhance crew results with formatted times and positions for final rounds
+            $enhancedCrewResults = $this->enhanceCrewResultsForResponse($allCrewResults, $raceResult);
+
             return response()->json([
                 'success' => true,
-                'data' => $allCrewResults,
+                'data' => $enhancedCrewResults,
+                'is_final_round' => $raceResult->isFinalRound(),
                 'message' => 'Crew results retrieved successfully'
             ], 200);
 
@@ -691,5 +699,60 @@ class RaceResultController extends BaseController
         }
         
         return 0;
+    }
+
+    /**
+     * Enhance crew results with additional data for API response.
+     * Adds formatted times, final positions, and other display data.
+     *
+     * @param \Illuminate\Support\Collection $crewResults
+     * @param RaceResult $raceResult
+     * @return array
+     */
+    private function enhanceCrewResultsForResponse($crewResults, $raceResult)
+    {
+        $isFinalRound = $raceResult->isFinalRound();
+        $finalPosition = 1;
+
+        return $crewResults->map(function($crewResult, $index) use ($isFinalRound, &$finalPosition) {
+            // Convert to array for consistent handling
+            $result = is_object($crewResult) ? (array)$crewResult : $crewResult;
+
+            // Add current round formatted time
+            if (isset($result['time_ms']) && $result['time_ms']) {
+                $result['formatted_time'] = CrewResult::formatTimeFromMs($result['time_ms']);
+            } else {
+                $result['formatted_time'] = null;
+            }
+
+            // Add final round specific data
+            if ($isFinalRound) {
+                // Add formatted final time
+                if (isset($result['final_time_ms']) && $result['final_time_ms']) {
+                    $result['formatted_final_time'] = CrewResult::formatTimeFromMs($result['final_time_ms']);
+                } else {
+                    $result['formatted_final_time'] = null;
+                }
+
+                // Add final position for crews with valid final times or DSQ status
+                if (isset($result['final_status'])) {
+                    if ($result['final_status'] === 'DSQ') {
+                        $result['final_position'] = 'DSQ';
+                    } elseif (isset($result['final_time_ms']) && $result['final_time_ms']) {
+                        $result['final_position'] = $finalPosition;
+                        $finalPosition++;
+                    } else {
+                        $result['final_position'] = null;
+                    }
+                } else {
+                    $result['final_position'] = null;
+                }
+            }
+
+            // Ensure consistent structure
+            $result['is_final_round'] = $isFinalRound;
+
+            return $result;
+        })->values()->toArray();
     }
 }
