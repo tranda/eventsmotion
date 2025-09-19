@@ -24,7 +24,7 @@ class PasswordResetMail extends Mailable
     {
         $resetUrl = env('APP_URL') . '/reset-password?token=' . $this->token;
 
-        return $this->subject('Reset Your Password - EuroCup Events')
+        return $this->subject('Reset Your Password - Events Platform')
                     ->view('emails.password-reset')
                     ->with([
                         'resetUrl' => $resetUrl,
