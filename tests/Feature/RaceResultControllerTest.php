@@ -562,4 +562,264 @@ class RaceResultControllerTest extends TestCase
         // Verify existing race was NOT deleted (transaction rolled back)
         $this->assertDatabaseHas('race_results', ['id' => $existingRace->id]);
     }
+
+    /**
+     * Test the enhanced bulk update method with cleanup functionality.
+     */
+    public function test_bulk_update_with_cleanup_parameter()
+    {
+        // Create test data
+        $event = Event::factory()->create();
+
+        // Create a discipline that matches what will be created by the bulk update
+        $discipline = Discipline::factory()->create([
+            'event_id' => $event->id,
+            'distance' => 500,
+            'age_group' => 'Senior',
+            'gender_group' => 'Open',
+            'boat_group' => 'standard'
+        ]);
+
+        // Create existing races that should be cleaned up
+        $orphanedRace1 = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'Heat 1',
+            'race_number' => 10,
+            'status' => 'SCHEDULED'
+        ]);
+
+        $orphanedRace2 = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'Heat 2',
+            'race_number' => 11,
+            'status' => 'SCHEDULED'
+        ]);
+
+        // Create crew results for orphaned races
+        $team1 = Team::factory()->create(['name' => 'Orphaned Team 1']);
+        $team2 = Team::factory()->create(['name' => 'Orphaned Team 2']);
+        $crew1 = Crew::factory()->create(['team_id' => $team1->id, 'discipline_id' => $discipline->id]);
+        $crew2 = Crew::factory()->create(['team_id' => $team2->id, 'discipline_id' => $discipline->id]);
+
+        CrewResult::factory()->create([
+            'crew_id' => $crew1->id,
+            'race_result_id' => $orphanedRace1->id,
+            'lane' => 1,
+            'status' => 'FINISHED'
+        ]);
+
+        CrewResult::factory()->create([
+            'crew_id' => $crew2->id,
+            'race_result_id' => $orphanedRace2->id,
+            'lane' => 1,
+            'status' => 'FINISHED'
+        ]);
+
+        // Verify orphaned data exists before cleanup
+        $this->assertDatabaseHas('race_results', ['id' => $orphanedRace1->id]);
+        $this->assertDatabaseHas('race_results', ['id' => $orphanedRace2->id]);
+        $this->assertDatabaseHas('crew_results', ['race_result_id' => $orphanedRace1->id]);
+        $this->assertDatabaseHas('crew_results', ['race_result_id' => $orphanedRace2->id]);
+
+        // Bulk update with cleanup enabled (only importing Heat 3 and Final)
+        $bulkUpdateData = [
+            'event_id' => $event->id,
+            'perform_cleanup' => true,
+            'races' => [
+                [
+                    'race_number' => 1,
+                    'start_time' => '10:00',
+                    'delay' => '0:00',
+                    'stage' => 'Heat 3',
+                    'competition' => 'Test Competition',
+                    'discipline_info' => 'Standard, Senior, Open 500m',
+                    'boat_size' => 'standard',
+                    'lanes' => [
+                        1 => [
+                            'team' => 'New Team 1',
+                            'time' => null
+                        ]
+                    ]
+                ],
+                [
+                    'race_number' => 2,
+                    'start_time' => '11:00',
+                    'delay' => '0:00',
+                    'stage' => 'Final',
+                    'competition' => 'Test Competition',
+                    'discipline_info' => 'Standard, Senior, Open 500m',
+                    'boat_size' => 'standard',
+                    'lanes' => [
+                        1 => [
+                            'team' => 'New Team 2',
+                            'time' => null
+                        ]
+                    ]
+                ]
+            ]
+        ];
+
+        $response = $this->postJson('/api/race-results/bulk-update', $bulkUpdateData);
+
+        $response->assertStatus(200)
+            ->assertJson([
+                'success' => true
+            ]);
+
+        $responseData = $response->json();
+
+        // Verify cleanup was performed
+        $this->assertArrayHasKey('cleanup_summary', $responseData['data']);
+        $this->assertNotEmpty($responseData['data']['cleanup_summary']);
+
+        // Check that orphaned races were deleted
+        $this->assertDatabaseMissing('race_results', ['id' => $orphanedRace1->id]);
+        $this->assertDatabaseMissing('race_results', ['id' => $orphanedRace2->id]);
+        $this->assertDatabaseMissing('crew_results', ['race_result_id' => $orphanedRace1->id]);
+        $this->assertDatabaseMissing('crew_results', ['race_result_id' => $orphanedRace2->id]);
+
+        // Verify new races were created
+        $this->assertDatabaseHas('race_results', [
+            'discipline_id' => $discipline->id,
+            'stage' => 'Heat 3',
+            'race_number' => 1
+        ]);
+        $this->assertDatabaseHas('race_results', [
+            'discipline_id' => $discipline->id,
+            'stage' => 'Final',
+            'race_number' => 2
+        ]);
+    }
+
+    /**
+     * Test bulk update without cleanup (default behavior preserved).
+     */
+    public function test_bulk_update_without_cleanup_preserves_existing_behavior()
+    {
+        // Create test data
+        $event = Event::factory()->create();
+
+        // Create a discipline
+        $discipline = Discipline::factory()->create([
+            'event_id' => $event->id,
+            'distance' => 500,
+            'age_group' => 'Senior',
+            'gender_group' => 'Open',
+            'boat_group' => 'standard'
+        ]);
+
+        // Create existing race
+        $existingRace = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'Heat 1',
+            'race_number' => 10,
+            'status' => 'SCHEDULED'
+        ]);
+
+        // Bulk update without cleanup parameter (should default to false)
+        $bulkUpdateData = [
+            'event_id' => $event->id,
+            // Note: no 'perform_cleanup' parameter - should default to false
+            'races' => [
+                [
+                    'race_number' => 1,
+                    'start_time' => '10:00',
+                    'delay' => '0:00',
+                    'stage' => 'Heat 2',
+                    'competition' => 'Test Competition',
+                    'discipline_info' => 'Standard, Senior, Open 500m',
+                    'boat_size' => 'standard',
+                    'lanes' => []
+                ]
+            ]
+        ];
+
+        $response = $this->postJson('/api/race-results/bulk-update', $bulkUpdateData);
+
+        $response->assertStatus(200)
+            ->assertJson([
+                'success' => true
+            ]);
+
+        $responseData = $response->json();
+
+        // Verify cleanup was NOT performed
+        $this->assertArrayNotHasKey('cleanup_summary', $responseData['data']);
+
+        // Check that existing race was NOT deleted (no cleanup)
+        $this->assertDatabaseHas('race_results', ['id' => $existingRace->id]);
+
+        // Verify new race was created
+        $this->assertDatabaseHas('race_results', [
+            'discipline_id' => $discipline->id,
+            'stage' => 'Heat 2',
+            'race_number' => 1
+        ]);
+    }
+
+    /**
+     * Test bulk update with cleanup disabled explicitly.
+     */
+    public function test_bulk_update_with_cleanup_explicitly_disabled()
+    {
+        // Create test data
+        $event = Event::factory()->create();
+
+        // Create a discipline
+        $discipline = Discipline::factory()->create([
+            'event_id' => $event->id,
+            'distance' => 500,
+            'age_group' => 'Senior',
+            'gender_group' => 'Open',
+            'boat_group' => 'standard'
+        ]);
+
+        // Create existing race
+        $existingRace = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'Heat 1',
+            'race_number' => 10,
+            'status' => 'SCHEDULED'
+        ]);
+
+        // Bulk update with cleanup explicitly disabled
+        $bulkUpdateData = [
+            'event_id' => $event->id,
+            'perform_cleanup' => false,
+            'races' => [
+                [
+                    'race_number' => 1,
+                    'start_time' => '10:00',
+                    'delay' => '0:00',
+                    'stage' => 'Heat 2',
+                    'competition' => 'Test Competition',
+                    'discipline_info' => 'Standard, Senior, Open 500m',
+                    'boat_size' => 'standard',
+                    'lanes' => []
+                ]
+            ]
+        ];
+
+        $response = $this->postJson('/api/race-results/bulk-update', $bulkUpdateData);
+
+        $response->assertStatus(200)
+            ->assertJson([
+                'success' => true
+            ]);
+
+        $responseData = $response->json();
+
+        // Verify cleanup was NOT performed
+        $this->assertArrayNotHasKey('cleanup_summary', $responseData['data']);
+
+        // Check that existing race was NOT deleted
+        $this->assertDatabaseHas('race_results', ['id' => $existingRace->id]);
+
+        // Verify new race was created
+        $this->assertDatabaseHas('race_results', [
+            'discipline_id' => $discipline->id,
+            'stage' => 'Heat 2',
+            'race_number' => 1
+        ]);
+    }
 }

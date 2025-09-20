@@ -370,6 +370,7 @@ class RaceResultController extends BaseController
     /**
      * Bulk update race plan data.
      * Uses discipline + stage as unique identifier.
+     * Optionally includes cleanup functionality for orphaned races by discipline.
      *
      * @param Request $request
      * @return \Illuminate\Http\JsonResponse
@@ -389,73 +390,142 @@ class RaceResultController extends BaseController
                 'races.*.lanes' => 'nullable|array',
                 'races.*.lanes.*.team' => 'nullable|string',
                 'races.*.lanes.*.time' => 'nullable|string',
-                'event_id' => 'required|exists:events,id'
+                'event_id' => 'required|exists:events,id',
+                'perform_cleanup' => 'boolean'
             ]);
 
-            $updatedRaces = [];
+            $performCleanup = $request->input('perform_cleanup', false);
 
-            foreach ($request->races as $raceData) {
-                \Log::info("Processing race: " . json_encode($raceData));
+            // Use database transaction for safety
+            \DB::beginTransaction();
 
-                // 1. Find or create discipline
-                $discipline = $this->findOrCreateDiscipline($raceData, $request->event_id);
-                \Log::info("Discipline created/found: " . json_encode($discipline->toArray()));
+            try {
+                $updatedRaces = [];
+                $cleanupResults = [];
+                $disciplinesProcessed = collect();
 
-                // 2. Calculate race time
-                $raceTime = $this->calculateRaceTime($raceData['start_time'], $raceData['delay']);
+                foreach ($request->races as $raceData) {
+                    \Log::info("Processing race: " . json_encode($raceData));
 
-                // 3. Update or create RaceResult using discipline + stage as unique key
-                $raceResult = RaceResult::updateOrCreate(
-                    [
-                        'discipline_id' => $discipline->id,
-                        'stage' => $raceData['stage']
-                    ],
-                    [
-                        'race_number' => $raceData['race_number'],
-                        'race_time' => $raceTime,
-                        'status' => 'SCHEDULED'
-                    ]
-                );
+                    // 1. Find or create discipline
+                    $discipline = $this->findOrCreateDiscipline($raceData, $request->event_id);
+                    \Log::info("Discipline created/found: " . json_encode($discipline->toArray()));
 
-                // 4. Update crew assignments if lanes are provided
-                if (isset($raceData['lanes']) && is_array($raceData['lanes'])) {
-                    $this->updateCrewAssignments($raceResult, $raceData['lanes']);
+                    // Track disciplines for cleanup
+                    if ($performCleanup && !$disciplinesProcessed->contains('id', $discipline->id)) {
+                        $disciplinesProcessed->push($discipline);
+                    }
+
+                    // 2. Calculate race time
+                    $raceTime = $this->calculateRaceTime($raceData['start_time'], $raceData['delay']);
+
+                    // 3. Update or create RaceResult using discipline + stage as unique key
+                    $raceResult = RaceResult::updateOrCreate(
+                        [
+                            'discipline_id' => $discipline->id,
+                            'stage' => $raceData['stage']
+                        ],
+                        [
+                            'race_number' => $raceData['race_number'],
+                            'race_time' => $raceTime,
+                            'status' => 'SCHEDULED'
+                        ]
+                    );
+
+                    // 4. Update crew assignments if lanes are provided
+                    if (isset($raceData['lanes']) && is_array($raceData['lanes'])) {
+                        $this->updateCrewAssignments($raceResult, $raceData['lanes']);
+                    }
+
+                    try {
+                        $raceResult->load('discipline', 'crewResults.crew.team');
+                    } catch (\Exception $e) {
+                        \Log::error("Error loading relationships: " . $e->getMessage());
+                        // Try loading without crew relationship
+                        $raceResult->load('discipline', 'crewResults.crew');
+                    }
+                    $updatedRaces[] = $raceResult;
                 }
 
-                try {
-                    $raceResult->load('discipline', 'crewResults.crew.team');
-                } catch (\Exception $e) {
-                    \Log::error("Error loading relationships: " . $e->getMessage());
-                    // Try loading without crew relationship
-                    $raceResult->load('discipline', 'crewResults.crew');
+                // Perform discipline-specific cleanup if requested
+                if ($performCleanup) {
+                    foreach ($disciplinesProcessed as $discipline) {
+                        // Get stages for this discipline from import data
+                        $disciplineStages = collect($request->races)
+                            ->filter(function($race) use ($discipline, $request) {
+                                $raceDiscParams = $this->extractDisciplineParams($race, $request->event_id);
+                                return $this->disciplineMatches($discipline, $raceDiscParams);
+                            })
+                            ->pluck('stage')
+                            ->unique()
+                            ->values()
+                            ->toArray();
+
+                        $disciplineCleanup = $this->performRaceCleanup($discipline->id, collect($request->races)->filter(function($race) use ($discipline, $request) {
+                            $raceDiscParams = $this->extractDisciplineParams($race, $request->event_id);
+                            return $this->disciplineMatches($discipline, $raceDiscParams);
+                        })->toArray());
+
+                        if ($disciplineCleanup['deleted_count'] > 0) {
+                            $cleanupResults[] = [
+                                'discipline_id' => $discipline->id,
+                                'discipline_title' => $discipline->title,
+                                'cleanup' => $disciplineCleanup
+                            ];
+                        }
+                    }
                 }
-                $updatedRaces[] = $raceResult;
+
+                // Auto-cancel races that were removed from the sheet (existing functionality)
+                $processedRaceIds = collect($updatedRaces)->pluck('id');
+                $cancelledCount = RaceResult::whereHas('discipline', function($query) use ($request) {
+                        $query->where('event_id', $request->event_id);
+                    })
+                    ->whereNotIn('id', $processedRaceIds)
+                    ->where('status', '!=', 'FINISHED')
+                    ->where('status', '!=', 'CANCELLED')
+                    ->update(['status' => 'CANCELLED']);
+
+                \DB::commit();
+
+                // Build response message
+                $message = 'Race plan updated successfully';
+                if ($cancelledCount > 0) {
+                    $message .= ". {$cancelledCount} races automatically cancelled (removed from sheet)";
+                }
+                if (!empty($cleanupResults)) {
+                    $totalCleaned = collect($cleanupResults)->sum('cleanup.deleted_count');
+                    $message .= ". Cleaned up {$totalCleaned} orphaned races from " . count($cleanupResults) . " discipline(s)";
+                }
+
+                $responseData = [
+                    'updated_races' => $updatedRaces
+                ];
+
+                // Include cleanup results if cleanup was performed
+                if ($performCleanup) {
+                    $responseData['cleanup_summary'] = $cleanupResults;
+                }
+
+                return response()->json([
+                    'success' => true,
+                    'data' => $responseData,
+                    'message' => $message
+                ], 200);
+
+            } catch (\Exception $e) {
+                \DB::rollBack();
+                throw $e;
             }
-
-            // Auto-cancel races that were removed from the sheet
-            $processedRaceIds = collect($updatedRaces)->pluck('id');
-            $cancelledCount = RaceResult::whereHas('discipline', function($query) use ($request) {
-                    $query->where('event_id', $request->event_id);
-                })
-                ->whereNotIn('id', $processedRaceIds)
-                ->where('status', '!=', 'FINISHED')
-                ->where('status', '!=', 'CANCELLED')
-                ->update(['status' => 'CANCELLED']);
-
-            $message = 'Race plan updated successfully';
-            if ($cancelledCount > 0) {
-                $message .= ". {$cancelledCount} races automatically cancelled (removed from sheet)";
-            }
-
-            return response()->json([
-                'success' => true,
-                'data' => $updatedRaces,
-                'message' => $message
-            ], 200);
 
         } catch (\Illuminate\Validation\ValidationException $e) {
             return $this->sendError('Validation error', $e->errors(), 422);
         } catch (\Exception $e) {
+            \Log::error('Race plan bulk update failed', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'event_id' => $request->event_id ?? null
+            ]);
             return $this->sendError('Error updating race plan', [$e->getMessage()], 500);
         }
     }
@@ -900,6 +970,70 @@ class RaceResultController extends BaseController
         }
 
         return $importedRaces;
+    }
+
+    /**
+     * Extract discipline parameters from race data.
+     *
+     * @param array $raceData
+     * @param int $eventId
+     * @return array
+     */
+    private function extractDisciplineParams($raceData, $eventId)
+    {
+        // Parse discipline info: "Small boat, Premier, Open 500m"
+        $disciplineInfo = $raceData['discipline_info'];
+        $boatSize = $raceData['boat_size'];
+
+        // Parse structured format: "boat_group, age_group, gender_group distance"
+        $parts = array_map('trim', explode(',', $disciplineInfo));
+
+        // Part 1: boat_group (mapped from boat_size parameter)
+        $boatGroup = $this->mapBoatSizeToGroup($boatSize);
+
+        // Part 2: age_group
+        $ageGroup = isset($parts[1]) ? trim($parts[1]) : 'Senior';
+
+        // Part 3: gender_group + distance
+        if (isset($parts[2])) {
+            $lastPart = trim($parts[2]);
+            // Extract distance from end (e.g., "Open 500m" -> distance=500, gender="Open")
+            if (preg_match('/(.+?)\s+(\d+)m?$/', $lastPart, $matches)) {
+                $genderGroup = trim($matches[1]);
+                $distance = (int)$matches[2];
+            } else {
+                // Fallback if no distance found
+                $genderGroup = $lastPart;
+                $distance = 500; // default
+            }
+        } else {
+            $genderGroup = 'Open';
+            $distance = 500;
+        }
+
+        return [
+            'event_id' => $eventId,
+            'distance' => $distance,
+            'age_group' => $ageGroup,
+            'gender_group' => $genderGroup,
+            'boat_group' => $boatGroup
+        ];
+    }
+
+    /**
+     * Check if a discipline matches the given parameters.
+     *
+     * @param Discipline $discipline
+     * @param array $params
+     * @return bool
+     */
+    private function disciplineMatches($discipline, $params)
+    {
+        return $discipline->event_id == $params['event_id'] &&
+               $discipline->distance == $params['distance'] &&
+               $discipline->age_group === $params['age_group'] &&
+               $discipline->gender_group === $params['gender_group'] &&
+               $discipline->boat_group === $params['boat_group'];
     }
 
     /**
