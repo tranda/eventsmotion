@@ -127,6 +127,13 @@ class RaceResult extends Model
         // Check if this is the final round for this discipline
         $isFinalRound = $this->isFinalRound();
 
+        \Log::info('Final round check for race', [
+            'race_id' => $this->id,
+            'stage' => $this->stage,
+            'discipline_id' => $this->discipline_id,
+            'is_final_round' => $isFinalRound
+        ]);
+
         // Get final times if this is the final round
         $finalTimes = $isFinalRound ? $this->getFinalTimesForDiscipline() : collect();
 

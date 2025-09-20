@@ -471,6 +471,28 @@ class RaceResultController extends BaseController
                         'discipline_ids' => $disciplinesProcessed->pluck('id')->toArray()
                     ]);
 
+                    // First, let's see what races exist for this event before cleanup
+                    $allEventRaces = RaceResult::whereHas('discipline', function($q) use ($request) {
+                        $q->where('event_id', $request->event_id);
+                    })->with('discipline')->get();
+
+                    \Log::info('All races in event before cleanup', [
+                        'event_id' => $request->event_id,
+                        'total_races' => $allEventRaces->count(),
+                        'races' => $allEventRaces->map(function($race) {
+                            return [
+                                'id' => $race->id,
+                                'race_number' => $race->race_number,
+                                'stage' => $race->stage,
+                                'status' => $race->status,
+                                'discipline_id' => $race->discipline_id,
+                                'boat_group' => $race->discipline->boat_group,
+                                'age_group' => $race->discipline->age_group,
+                                'gender_group' => $race->discipline->gender_group
+                            ];
+                        })->toArray()
+                    ]);
+
                     foreach ($disciplinesProcessed as $discipline) {
                         // Get stages for this discipline from import data
                         $disciplineStages = collect($request->races)
