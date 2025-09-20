@@ -269,38 +269,39 @@ class PublicController extends BaseController
                     $isFinalRound = $raceResult->isFinalRound();
                     $raceResult->is_final_round = $isFinalRound;
 
-                    // Get all crew results with final time calculations
-                    $allCrewResults = $raceResult->allCrewResults();
+                    // For final rounds, calculate final times and manually add them to existing crew results
+                    if ($isFinalRound) {
+                        $finalTimes = $raceResult->getFinalTimesForDiscipline();
 
-                    // Convert the collection to array format that can be JSON serialized
-                    $enhancedCrewResults = $allCrewResults->map(function($crewResult) {
-                        // Handle both actual CrewResult models and virtual objects
-                        if (is_object($crewResult)) {
-                            // Convert to array and explicitly add final time fields
-                            $result = $crewResult instanceof \Illuminate\Database\Eloquent\Model
-                                ? $crewResult->toArray()
-                                : (array) $crewResult;
-
-                            // Ensure final time fields are included
-                            $result['final_time_ms'] = $crewResult->final_time_ms ?? null;
-                            $result['final_status'] = $crewResult->final_status ?? null;
-                            $result['is_final_round'] = $crewResult->is_final_round ?? false;
-
-                            return $result;
-                        }
-
-                        return null;
-                    })->filter()->values();
-
-                    // Replace the standard crew_results with enhanced version
-                    $raceResult->crew_results = $enhancedCrewResults;
+                        // Add final time fields to existing crew_results
+                        $raceResult->crew_results->each(function($crewResult) use ($finalTimes) {
+                            $finalData = $finalTimes->get($crewResult->crew_id);
+                            if ($finalData) {
+                                $crewResult->final_time_ms = $finalData['final_time_ms'];
+                                $crewResult->final_status = $finalData['final_status'];
+                            } else {
+                                $crewResult->final_time_ms = null;
+                                $crewResult->final_status = null;
+                            }
+                            $crewResult->is_final_round = true;
+                        });
+                    } else {
+                        // For non-final rounds, just add the flag
+                        $raceResult->crew_results->each(function($crewResult) {
+                            $crewResult->final_time_ms = null;
+                            $crewResult->final_status = null;
+                            $crewResult->is_final_round = false;
+                        });
+                    }
 
                     \Log::info('🔍 Race result enhanced', [
                         'race_id' => $raceResult->id,
                         'stage' => $raceResult->stage,
                         'is_final_round' => $isFinalRound,
-                        'crew_results_count' => $enhancedCrewResults->count(),
-                        'first_crew_final_time' => $enhancedCrewResults->first()['final_time_ms'] ?? 'null'
+                        'crew_results_count' => $raceResult->crew_results->count(),
+                        'first_crew_final_time' => $isFinalRound && $raceResult->crew_results->count() > 0
+                            ? $raceResult->crew_results->first()->final_time_ms
+                            : 'null'
                     ]);
 
                     return $raceResult;
