@@ -273,8 +273,13 @@ class PublicController extends BaseController
                     if ($isFinalRound) {
                         $finalTimes = $raceResult->getFinalTimesForDiscipline();
 
+                        // Ensure crew_results relationship is loaded
+                        if (!$raceResult->relationLoaded('crewResults')) {
+                            $raceResult->load('crewResults.crew.team');
+                        }
+
                         // Add final time fields to existing crew_results
-                        $raceResult->crew_results->each(function($crewResult) use ($finalTimes) {
+                        $raceResult->crewResults->each(function($crewResult) use ($finalTimes) {
                             $finalData = $finalTimes->get($crewResult->crew_id);
                             if ($finalData) {
                                 $crewResult->final_time_ms = $finalData['final_time_ms'];
@@ -287,10 +292,19 @@ class PublicController extends BaseController
                         });
                     } else {
                         // For non-final rounds, just add the flag
-                        $raceResult->crew_results->each(function($crewResult) {
-                            $crewResult->final_time_ms = null;
-                            $crewResult->final_status = null;
-                            $crewResult->is_final_round = false;
+                        if ($raceResult->relationLoaded('crewResults')) {
+                            $raceResult->crewResults->each(function($crewResult) {
+                                $crewResult->final_time_ms = null;
+                                $crewResult->final_status = null;
+                                $crewResult->is_final_round = false;
+                            });
+                        }
+                    }
+
+                    // Make sure the final time fields are appended to JSON
+                    if ($raceResult->relationLoaded('crewResults')) {
+                        $raceResult->crewResults->each(function($crewResult) {
+                            $crewResult->append(['final_time_ms', 'final_status', 'is_final_round']);
                         });
                     }
 
@@ -298,9 +312,9 @@ class PublicController extends BaseController
                         'race_id' => $raceResult->id,
                         'stage' => $raceResult->stage,
                         'is_final_round' => $isFinalRound,
-                        'crew_results_count' => $raceResult->crew_results->count(),
-                        'first_crew_final_time' => $isFinalRound && $raceResult->crew_results->count() > 0
-                            ? $raceResult->crew_results->first()->final_time_ms
+                        'crew_results_count' => $raceResult->relationLoaded('crewResults') ? $raceResult->crewResults->count() : 0,
+                        'first_crew_final_time' => $isFinalRound && $raceResult->relationLoaded('crewResults') && $raceResult->crewResults->count() > 0
+                            ? $raceResult->crewResults->first()->final_time_ms
                             : 'null'
                     ]);
 
