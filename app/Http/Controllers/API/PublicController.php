@@ -93,7 +93,9 @@ class PublicController extends BaseController
             ], 200)
             ->header('Access-Control-Allow-Origin', '*')
             ->header('Access-Control-Allow-Methods', 'GET, OPTIONS')
-            ->header('Access-Control-Allow-Headers', 'Content-Type, Accept');
+            ->header('Access-Control-Allow-Headers', 'Content-Type, Accept')
+            ->header('Cache-Control', 'public, max-age=30')
+;
 
         } catch (\Exception $e) {
             return $this->sendError('Error retrieving public race results', [$e->getMessage()], 500)
@@ -195,7 +197,9 @@ class PublicController extends BaseController
             ], 200)
             ->header('Access-Control-Allow-Origin', '*')
             ->header('Access-Control-Allow-Methods', 'GET, OPTIONS')
-            ->header('Access-Control-Allow-Headers', 'Content-Type, Accept');
+            ->header('Access-Control-Allow-Headers', 'Content-Type, Accept')
+            ->header('Cache-Control', 'public, max-age=30')
+;
 
         } catch (\Exception $e) {
             return $this->sendError('Error retrieving public race result detail', [$e->getMessage()], 500)
@@ -338,7 +342,9 @@ class PublicController extends BaseController
             ], 200)
             ->header('Access-Control-Allow-Origin', '*')
             ->header('Access-Control-Allow-Methods', 'GET, OPTIONS')
-            ->header('Access-Control-Allow-Headers', 'Content-Type, Accept');
+            ->header('Access-Control-Allow-Headers', 'Content-Type, Accept')
+            ->header('Cache-Control', 'public, max-age=30')
+;
 
         } catch (\Exception $e) {
             return $this->sendError('Error retrieving race results', [$e->getMessage()], 500)
@@ -415,7 +421,9 @@ class PublicController extends BaseController
             ], 200)
             ->header('Access-Control-Allow-Origin', '*')
             ->header('Access-Control-Allow-Methods', 'GET, OPTIONS')
-            ->header('Access-Control-Allow-Headers', 'Content-Type, Accept');
+            ->header('Access-Control-Allow-Headers', 'Content-Type, Accept')
+            ->header('Cache-Control', 'public, max-age=30')
+;
 
         } catch (\Exception $e) {
             return $this->sendError('Error retrieving race result', [$e->getMessage()], 500)
