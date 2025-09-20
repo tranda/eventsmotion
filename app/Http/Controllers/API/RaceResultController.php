@@ -396,6 +396,12 @@ class RaceResultController extends BaseController
 
             $performCleanup = $request->input('perform_cleanup', true);
 
+            \Log::info('=== bulkUpdate method called ===', [
+                'perform_cleanup' => $performCleanup,
+                'races_count' => count($request->races ?? []),
+                'event_id' => $request->event_id
+            ]);
+
             // Use database transaction for safety
             \DB::beginTransaction();
 
@@ -414,6 +420,10 @@ class RaceResultController extends BaseController
                     // Track disciplines for cleanup
                     if ($performCleanup && !$disciplinesProcessed->contains('id', $discipline->id)) {
                         $disciplinesProcessed->push($discipline);
+                        \Log::info('Added discipline for cleanup tracking', [
+                            'discipline_id' => $discipline->id,
+                            'total_disciplines_tracked' => $disciplinesProcessed->count()
+                        ]);
                     }
 
                     // 2. Calculate race time
