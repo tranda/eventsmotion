@@ -214,10 +214,10 @@ class RaceResult extends Model
      * Check if this race result represents the final round for its discipline.
      * A race is considered the final round if:
      * 1. Its stage is exactly "Grand Final" or "Final" (exact string matches), OR
-     * 2. It is the chronologically last round in the series for this discipline
+     * 2. It is the highest race number in the discipline AND not an excluded stage type
      *
-     * Stages like "Minor Final", "Semi Final", etc. are NOT considered final rounds
-     * unless they happen to be the last round chronologically.
+     * Stages like "Minor Final", "Semi Final", "Heat X" (when not the highest), etc.
+     * are NOT considered final rounds.
      */
     public function isFinalRound()
     {
@@ -236,46 +236,69 @@ class RaceResult extends Model
             return true;
         }
 
-        // Second check: Is this the chronologically last round in the discipline?
-        $isLastRound = $this->isLastRoundInDiscipline();
+        // Second check: Exclude stages that should never be considered final
+        $excludedStages = [
+            'Minor Final', 'Minor final', 'minor final',
+            'Semi Final', 'Semifinal', 'semi final', 'semifinal',
+            'Quarter Final', 'Quarterfinal', 'quarter final', 'quarterfinal',
+            'Consolation Final', 'consolation final'
+        ];
+
+        $isExcludedStage = in_array($this->stage, $excludedStages, true);
+
+        if ($isExcludedStage) {
+            \Log::info('🏁 Final round determination - excluded stage', [
+                'race_id' => $this->id,
+                'stage' => $this->stage,
+                'discipline_id' => $this->discipline_id,
+                'is_final' => false,
+                'reason' => 'excluded_stage_type'
+            ]);
+            return false;
+        }
+
+        // Third check: Is this the highest race number in the discipline?
+        $isHighestRaceNumber = $this->isHighestRaceNumberInDiscipline();
 
         \Log::info('🏁 Final round determination', [
             'race_id' => $this->id,
             'stage' => $this->stage,
             'discipline_id' => $this->discipline_id,
+            'race_number' => $this->race_number,
             'is_exact_final_stage' => $isExactFinalStage,
-            'is_last_round' => $isLastRound,
-            'is_final' => $isLastRound,
-            'reason' => $isLastRound ? 'last_round_chronologically' : 'not_final'
+            'is_excluded_stage' => $isExcludedStage,
+            'is_highest_race_number' => $isHighestRaceNumber,
+            'is_final' => $isHighestRaceNumber,
+            'reason' => $isHighestRaceNumber ? 'highest_race_number' : 'not_final'
         ]);
 
-        return $isLastRound;
+        return $isHighestRaceNumber;
     }
 
     /**
-     * Check if this race result is the chronologically last round in its discipline.
-     * Uses creation time and ID as tiebreakers for consistent ordering.
+     * Check if this race result has the highest race number in its discipline.
+     * Race numbers are the most reliable indicator of race sequence.
      *
      * @return bool
      */
-    private function isLastRoundInDiscipline()
+    private function isHighestRaceNumberInDiscipline()
     {
-        // Get all race results for this discipline ordered by creation time (most reliable)
-        // and as fallback by ID for deterministic results
-        $allRounds = RaceResult::where('discipline_id', $this->discipline_id)
-            ->orderBy('created_at', 'desc')
-            ->orderBy('id', 'desc') // Secondary sort for deterministic results
-            ->get();
+        // Get the highest race number for this discipline
+        $highestRaceNumber = RaceResult::where('discipline_id', $this->discipline_id)
+            ->max('race_number');
 
-        // If there's only one round, it's the final round
-        if ($allRounds->count() <= 1) {
-            return true;
-        }
+        // If there's no other race or this race has the highest number, it could be final
+        $isHighest = $this->race_number === $highestRaceNumber;
 
-        // The first record in the desc-ordered collection is the latest/last round
-        $lastRound = $allRounds->first();
+        \Log::info('🏁 Race number check for final determination', [
+            'race_id' => $this->id,
+            'race_number' => $this->race_number,
+            'highest_race_number' => $highestRaceNumber,
+            'discipline_id' => $this->discipline_id,
+            'is_highest' => $isHighest
+        ]);
 
-        return $lastRound->id === $this->id;
+        return $isHighest;
     }
 
 

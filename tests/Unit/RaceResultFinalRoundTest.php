@@ -5,6 +5,7 @@ namespace Tests\Unit;
 use Tests\TestCase;
 use App\Models\RaceResult;
 use App\Models\Discipline;
+use App\Models\Event;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Log;
 
@@ -12,162 +13,195 @@ class RaceResultFinalRoundTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_single_round_is_final_round()
+    protected $event;
+    protected $discipline1;
+    protected $discipline2;
+
+    protected function setUp(): void
     {
-        // Create a discipline
-        $discipline = Discipline::factory()->create();
+        parent::setUp();
 
-        // Create a single race result
-        $raceResult = RaceResult::factory()->create([
-            'discipline_id' => $discipline->id,
-            'stage' => 'Round 1'
-        ]);
-
-        $this->assertTrue($raceResult->isFinalRound());
+        // Create test event and disciplines
+        $this->event = Event::factory()->create(['name' => 'Test Event']);
+        $this->discipline1 = Discipline::factory()->create(['event_id' => $this->event->id]);
+        $this->discipline2 = Discipline::factory()->create(['event_id' => $this->event->id]);
     }
 
-    public function test_two_rounds_final_detection()
+    /** @test */
+    public function exact_final_stage_names_are_detected_as_final()
     {
-        // Create a discipline
-        $discipline = Discipline::factory()->create();
-
-        // Create Round 1 first (older)
-        $round1 = RaceResult::factory()->create([
-            'discipline_id' => $discipline->id,
-            'stage' => 'Round 1',
-            'created_at' => now()->subHour()
+        // Test "Final"
+        $finalRace = RaceResult::factory()->create([
+            'race_number' => 5,
+            'stage' => 'Final',
+            'discipline_id' => $this->discipline1->id
         ]);
 
-        // Create Round 2 second (newer)
-        $round2 = RaceResult::factory()->create([
-            'discipline_id' => $discipline->id,
-            'stage' => 'Round 2',
-            'created_at' => now()
+        $this->assertTrue($finalRace->isFinalRound(), 'Race with stage "Final" should be detected as final round');
+
+        // Test "Grand Final"
+        $grandFinalRace = RaceResult::factory()->create([
+            'race_number' => 3,
+            'stage' => 'Grand Final',
+            'discipline_id' => $this->discipline2->id
         ]);
 
-        // Round 1 should NOT be final
-        $this->assertFalse($round1->fresh()->isFinalRound());
-
-        // Round 2 should be final
-        $this->assertTrue($round2->fresh()->isFinalRound());
+        $this->assertTrue($grandFinalRace->isFinalRound(), 'Race with stage "Grand Final" should be detected as final round');
     }
 
-    public function test_multiple_rounds_final_detection()
+    /** @test */
+    public function minor_final_is_not_detected_as_final()
     {
-        // Create a discipline
-        $discipline = Discipline::factory()->create();
+        $minorFinalRace = RaceResult::factory()->create([
+            'race_number' => 9,
+            'stage' => 'Minor Final',
+            'discipline_id' => $this->discipline1->id
+        ]);
 
-        // Create multiple rounds
-        $rounds = [];
-        for ($i = 1; $i <= 5; $i++) {
-            $rounds[$i] = RaceResult::factory()->create([
-                'discipline_id' => $discipline->id,
-                'stage' => "Round $i",
-                'created_at' => now()->subHours(5 - $i) // Round 5 is newest
+        $this->assertFalse($minorFinalRace->isFinalRound(), 'Race with stage "Minor Final" should NOT be detected as final round');
+    }
+
+    /** @test */
+    public function excluded_stages_are_not_final()
+    {
+        $excludedStages = [
+            'Minor Final',
+            'Semi Final',
+            'Semifinal',
+            'Quarter Final',
+            'Quarterfinal',
+            'Consolation Final'
+        ];
+
+        foreach ($excludedStages as $stage) {
+            $race = RaceResult::factory()->create([
+                'race_number' => 10, // Make it highest race number
+                'stage' => $stage,
+                'discipline_id' => $this->discipline1->id
             ]);
-        }
 
-        // Only Round 5 should be final
-        for ($i = 1; $i <= 4; $i++) {
-            $this->assertFalse($rounds[$i]->fresh()->isFinalRound(), "Round $i should not be final");
+            $this->assertFalse(
+                $race->isFinalRound(),
+                "Race with stage '{$stage}' should NOT be detected as final round even if it has highest race number"
+            );
+
+            // Clean up for next iteration
+            $race->delete();
         }
-        $this->assertTrue($rounds[5]->fresh()->isFinalRound(), "Round 5 should be final");
     }
 
-    public function test_non_round_stages_use_creation_time()
+    /** @test */
+    public function heat_1_is_not_final_when_there_are_higher_race_numbers()
     {
-        // Create a discipline
-        $discipline = Discipline::factory()->create();
-
-        // Create different stage types
+        // Create Heat 1
         $heat1 = RaceResult::factory()->create([
-            'discipline_id' => $discipline->id,
+            'race_number' => 3,
             'stage' => 'Heat 1',
-            'created_at' => now()->subHours(3)
+            'discipline_id' => $this->discipline1->id
         ]);
 
-        $semifinal = RaceResult::factory()->create([
-            'discipline_id' => $discipline->id,
-            'stage' => 'Semifinal',
-            'created_at' => now()->subHours(2)
+        // Create a race with higher number
+        $finalRace = RaceResult::factory()->create([
+            'race_number' => 5,
+            'stage' => 'Final',
+            'discipline_id' => $this->discipline1->id
+        ]);
+
+        $this->assertFalse($heat1->isFinalRound(), 'Heat 1 should NOT be final when there are races with higher numbers');
+        $this->assertTrue($finalRace->isFinalRound(), 'Race with stage "Final" should be detected as final');
+    }
+
+    /** @test */
+    public function single_heat_is_final()
+    {
+        $singleHeat = RaceResult::factory()->create([
+            'race_number' => 1,
+            'stage' => 'Heat 1',
+            'discipline_id' => $this->discipline1->id
+        ]);
+
+        $this->assertTrue($singleHeat->isFinalRound(), 'Single heat should be considered final when it\'s the only race');
+    }
+
+    /** @test */
+    public function highest_race_number_is_final_if_not_excluded()
+    {
+        // Create multiple races
+        RaceResult::factory()->create([
+            'race_number' => 1,
+            'stage' => 'Heat 1',
+            'discipline_id' => $this->discipline1->id
+        ]);
+
+        RaceResult::factory()->create([
+            'race_number' => 2,
+            'stage' => 'Heat 2',
+            'discipline_id' => $this->discipline1->id
+        ]);
+
+        $highestRace = RaceResult::factory()->create([
+            'race_number' => 3,
+            'stage' => 'Heat 3',
+            'discipline_id' => $this->discipline1->id
+        ]);
+
+        $this->assertTrue($highestRace->isFinalRound(), 'Race with highest race number should be final if not excluded');
+    }
+
+    /** @test */
+    public function races_in_different_disciplines_are_independent()
+    {
+        // Discipline 1: Heat 1 with race_number 3
+        $disc1Heat1 = RaceResult::factory()->create([
+            'race_number' => 3,
+            'stage' => 'Heat 1',
+            'discipline_id' => $this->discipline1->id
+        ]);
+
+        // Discipline 1: Final with race_number 5
+        $disc1Final = RaceResult::factory()->create([
+            'race_number' => 5,
+            'stage' => 'Final',
+            'discipline_id' => $this->discipline1->id
+        ]);
+
+        // Discipline 2: Heat 1 with race_number 9 (highest in its discipline)
+        $disc2Heat1 = RaceResult::factory()->create([
+            'race_number' => 9,
+            'stage' => 'Heat 1',
+            'discipline_id' => $this->discipline2->id
+        ]);
+
+        $this->assertFalse($disc1Heat1->isFinalRound(), 'Discipline 1 Heat 1 should not be final');
+        $this->assertTrue($disc1Final->isFinalRound(), 'Discipline 1 Final should be final');
+        $this->assertTrue($disc2Heat1->isFinalRound(), 'Discipline 2 Heat 1 should be final (highest in its discipline)');
+    }
+
+    /** @test */
+    public function complex_scenario_matches_requirements()
+    {
+        // Create the exact scenario from the issue
+        $heat1 = RaceResult::factory()->create([
+            'race_number' => 3,
+            'stage' => 'Heat 1',
+            'discipline_id' => $this->discipline1->id
         ]);
 
         $final = RaceResult::factory()->create([
-            'discipline_id' => $discipline->id,
+            'race_number' => 5,
             'stage' => 'Final',
-            'created_at' => now()->subHour()
+            'discipline_id' => $this->discipline1->id
         ]);
 
-        // Only the last created should be final
-        $this->assertFalse($heat1->fresh()->isFinalRound());
-        $this->assertFalse($semifinal->fresh()->isFinalRound());
-        $this->assertTrue($final->fresh()->isFinalRound());
-    }
-
-    public function test_mixed_round_and_other_stages()
-    {
-        // Create a discipline
-        $discipline = Discipline::factory()->create();
-
-        // Create mixed stages
-        $round1 = RaceResult::factory()->create([
-            'discipline_id' => $discipline->id,
-            'stage' => 'Round 1',
-            'created_at' => now()->subHours(4)
+        $minorFinal = RaceResult::factory()->create([
+            'race_number' => 9,
+            'stage' => 'Minor Final',
+            'discipline_id' => $this->discipline2->id
         ]);
 
-        $round2 = RaceResult::factory()->create([
-            'discipline_id' => $discipline->id,
-            'stage' => 'Round 2',
-            'created_at' => now()->subHours(3)
-        ]);
-
-        $semifinal = RaceResult::factory()->create([
-            'discipline_id' => $discipline->id,
-            'stage' => 'Semifinal',
-            'created_at' => now()->subHours(2)
-        ]);
-
-        $round3 = RaceResult::factory()->create([
-            'discipline_id' => $discipline->id,
-            'stage' => 'Round 3',
-            'created_at' => now()->subHour()
-        ]);
-
-        // Round 3 should be final (highest round number)
-        $this->assertFalse($round1->fresh()->isFinalRound());
-        $this->assertFalse($round2->fresh()->isFinalRound());
-        $this->assertFalse($semifinal->fresh()->isFinalRound());
-        $this->assertTrue($round3->fresh()->isFinalRound());
-    }
-
-    public function test_different_disciplines_are_separate()
-    {
-        // Create two disciplines
-        $discipline1 = Discipline::factory()->create();
-        $discipline2 = Discipline::factory()->create();
-
-        // Create rounds for each discipline
-        $d1_round1 = RaceResult::factory()->create([
-            'discipline_id' => $discipline1->id,
-            'stage' => 'Round 1',
-            'created_at' => now()->subHour()
-        ]);
-
-        $d1_round2 = RaceResult::factory()->create([
-            'discipline_id' => $discipline1->id,
-            'stage' => 'Round 2',
-            'created_at' => now()
-        ]);
-
-        $d2_round1 = RaceResult::factory()->create([
-            'discipline_id' => $discipline2->id,
-            'stage' => 'Round 1'
-        ]);
-
-        // Each discipline should have its own final round
-        $this->assertFalse($d1_round1->fresh()->isFinalRound());
-        $this->assertTrue($d1_round2->fresh()->isFinalRound());
-        $this->assertTrue($d2_round1->fresh()->isFinalRound()); // Only round in discipline 2
+        // Verify expected behavior
+        $this->assertFalse($heat1->isFinalRound(), 'Race #3 "Heat 1" should NOT be final');
+        $this->assertTrue($final->isFinalRound(), 'Race #5 "Final" should be final');
+        $this->assertFalse($minorFinal->isFinalRound(), 'Race #9 "Minor Final" should NOT be final');
     }
 }
