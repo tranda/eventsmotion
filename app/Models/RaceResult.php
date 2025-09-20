@@ -200,9 +200,11 @@ class RaceResult extends Model
      */
     public function isFinalRound()
     {
-        // Get all race results for this discipline ordered by stage
+        // Get all race results for this discipline ordered by creation time (most reliable)
+        // and as fallback by stage name with natural sorting
         $allRounds = RaceResult::where('discipline_id', $this->discipline_id)
-            ->orderBy('stage')
+            ->orderBy('created_at')
+            ->orderBy('id') // Secondary sort for deterministic results
             ->get();
 
         // If there's only one round, it's the final round
@@ -210,9 +212,111 @@ class RaceResult extends Model
             return true;
         }
 
-        // Check if this is the last stage alphabetically/numerically
-        $lastRound = $allRounds->last();
-        return $lastRound->id === $this->id;
+        // If stages follow "Round X" pattern, use numeric extraction for better sorting
+        $stageNumbers = $allRounds->map(function($round) {
+            if (preg_match('/Round (\d+)/i', $round->stage, $matches)) {
+                return [
+                    'id' => $round->id,
+                    'stage' => $round->stage,
+                    'round_number' => (int) $matches[1],
+                    'created_at' => $round->created_at
+                ];
+            }
+            return [
+                'id' => $round->id,
+                'stage' => $round->stage,
+                'round_number' => 0, // Non-round stages get 0
+                'created_at' => $round->created_at
+            ];
+        });
+
+        // Sort by round number (highest first), then by creation time (latest first)
+        $sortedRounds = $stageNumbers->sortByDesc(function($round) {
+            return [$round['round_number'], $round['created_at']->timestamp];
+        });
+
+        $lastRound = $sortedRounds->first(); // First after desc sort is the highest/latest
+        return $lastRound['id'] === $this->id;
+    }
+
+    /**
+     * Debug version of isFinalRound() with logging for troubleshooting.
+     * Use this temporarily to debug final round detection issues.
+     */
+    public function isFinalRoundDebug()
+    {
+        // Get all race results for this discipline ordered by creation time (most reliable)
+        // and as fallback by stage name with natural sorting
+        $allRounds = RaceResult::where('discipline_id', $this->discipline_id)
+            ->orderBy('created_at')
+            ->orderBy('id') // Secondary sort for deterministic results
+            ->get();
+
+        // If there's only one round, it's the final round
+        if ($allRounds->count() <= 1) {
+            \Log::info('Single round detected as final', [
+                'race_id' => $this->id,
+                'stage' => $this->stage,
+                'discipline_id' => $this->discipline_id
+            ]);
+            return true;
+        }
+
+        // For debugging: log the current state
+        \Log::info('Checking final round', [
+            'current_race_id' => $this->id,
+            'current_stage' => $this->stage,
+            'discipline_id' => $this->discipline_id,
+            'all_rounds' => $allRounds->map(function($round) {
+                return [
+                    'id' => $round->id,
+                    'stage' => $round->stage,
+                    'created_at' => $round->created_at->toDateTimeString()
+                ];
+            })->toArray()
+        ]);
+
+        // If stages follow "Round X" pattern, use numeric extraction for better sorting
+        $stageNumbers = $allRounds->map(function($round) {
+            if (preg_match('/Round (\d+)/i', $round->stage, $matches)) {
+                return [
+                    'id' => $round->id,
+                    'stage' => $round->stage,
+                    'round_number' => (int) $matches[1],
+                    'created_at' => $round->created_at
+                ];
+            }
+            return [
+                'id' => $round->id,
+                'stage' => $round->stage,
+                'round_number' => 0, // Non-round stages get 0
+                'created_at' => $round->created_at
+            ];
+        });
+
+        // Sort by round number (highest first), then by creation time (latest first)
+        $sortedRounds = $stageNumbers->sortByDesc(function($round) {
+            return [$round['round_number'], $round['created_at']->timestamp];
+        });
+
+        $lastRound = $sortedRounds->first(); // First after desc sort is the highest/latest
+        $isFinal = $lastRound['id'] === $this->id;
+
+        \Log::info('Final round determination', [
+            'last_round_id' => $lastRound['id'],
+            'last_round_stage' => $lastRound['stage'],
+            'last_round_number' => $lastRound['round_number'],
+            'current_is_final' => $isFinal,
+            'sorted_rounds' => $sortedRounds->map(function($round) {
+                return [
+                    'id' => $round['id'],
+                    'stage' => $round['stage'],
+                    'round_number' => $round['round_number']
+                ];
+            })->toArray()
+        ]);
+
+        return $isFinal;
     }
 
     /**
