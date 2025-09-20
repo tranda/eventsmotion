@@ -368,17 +368,17 @@ class PublicController extends BaseController
             }
 
             // Get crew results for this specific race only (same as list view)
-            $allCrewResults = $raceResult->crewResults()
+            $crewResults = $raceResult->crewResults()
                 ->with(['crew.team', 'crew.discipline'])
                 ->get();
 
             // Convert race result to array for proper JSON serialization
             $raceResultArray = $raceResult->toArray();
 
-            // Add properly serialized crew results (handle stdClass objects)
-            $raceResultArray['crew_results'] = $allCrewResults->map(function($crewResult) {
-                // allCrewResults returns stdClass objects, so cast to array
-                return (array) $crewResult;
+            // Add properly serialized crew results (handle Eloquent models)
+            $raceResultArray['crew_results'] = $crewResults->map(function($crewResult) {
+                // crewResults returns Eloquent models, so use toArray()
+                return $crewResult->toArray();
             })->values()->toArray();
 
             return response()->json([
