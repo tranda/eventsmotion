@@ -370,12 +370,17 @@ class PublicController extends BaseController
             // Get all crew results (including crews without results) - same as authenticated API
             $allCrewResults = $raceResult->allCrewResults();
 
-            // Add the crew results to the race result object
-            $raceResult->crew_results = $allCrewResults;
+            // Convert race result to array for proper JSON serialization
+            $raceResultArray = $raceResult->toArray();
+
+            // Add properly serialized crew results
+            $raceResultArray['crew_results'] = $allCrewResults->map(function($crewResult) {
+                return $crewResult->toArray();
+            });
 
             return response()->json([
                 'success' => true,
-                'data' => $raceResult,
+                'data' => $raceResultArray,
                 'message' => 'Race result retrieved successfully'
             ], 200)
             ->header('Access-Control-Allow-Origin', '*')

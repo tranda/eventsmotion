@@ -55,12 +55,19 @@ class RaceResultController extends BaseController
                 // Get all crew results with final time calculations
                 $allCrewResults = $raceResult->allCrewResults();
 
-                // Replace the standard crew_results with enhanced version
-                $raceResult->crew_results = $allCrewResults;
-                $raceResult->is_final_round = $raceResult->isFinalRound();
-                $raceResult->show_accumulated_time = $raceResult->shouldShowAccumulatedTime();
+                // Convert to array for proper JSON serialization
+                $raceResultArray = $raceResult->toArray();
 
-                return $raceResult;
+                // Add enhanced crew results (already arrays from allCrewResults)
+                $raceResultArray['crew_results'] = $allCrewResults->map(function($crewResult) {
+                    return $crewResult->toArray();
+                });
+
+                // Add additional computed properties
+                $raceResultArray['is_final_round'] = $raceResult->isFinalRound();
+                $raceResultArray['show_accumulated_time'] = $raceResult->shouldShowAccumulatedTime();
+
+                return $raceResultArray;
             });
 
             return response()->json([
@@ -97,14 +104,21 @@ class RaceResultController extends BaseController
             // Enhance crew results with formatted times and positions for final rounds
             $enhancedCrewResults = $this->enhanceCrewResultsForResponse($allCrewResults, $raceResult);
 
-            // Add enhanced data to the race result object
-            $raceResult->crew_results = $enhancedCrewResults;
-            $raceResult->is_final_round = $raceResult->isFinalRound();
-            $raceResult->show_accumulated_time = $raceResult->shouldShowAccumulatedTime();
+            // Convert to array for proper JSON serialization
+            $raceResultArray = $raceResult->toArray();
+
+            // Add enhanced crew results (properly serialized)
+            $raceResultArray['crew_results'] = $enhancedCrewResults->map(function($crewResult) {
+                return $crewResult->toArray();
+            });
+
+            // Add additional computed properties
+            $raceResultArray['is_final_round'] = $raceResult->isFinalRound();
+            $raceResultArray['show_accumulated_time'] = $raceResult->shouldShowAccumulatedTime();
 
             return response()->json([
                 'success' => true,
-                'data' => $raceResult,
+                'data' => $raceResultArray,
                 'message' => 'Race result retrieved successfully'
             ], 200);
 
