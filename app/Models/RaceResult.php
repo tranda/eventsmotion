@@ -304,34 +304,15 @@ class RaceResult extends Model
 
     /**
      * Determine whether accumulated times should be shown for this race.
-     * Based on frontend logic: show total for exact "Final" and "Grand Final" stages (always),
-     * show total for numbered rounds/heats only if it's the last in sequence,
-     * don't show total for other stages (Minor Final, Semi Final, etc.)
+     * Accumulated times should ONLY be shown for the chronologically last round
+     * in a discipline sequence, regardless of the stage name.
      *
      * @return bool
      */
     public function shouldShowAccumulatedTime()
     {
-        // First check: Exact stage name matches for "Final" and "Grand Final"
-        $alwaysShowStages = ['Final', 'Grand Final'];
-        if (in_array($this->stage, $alwaysShowStages, true)) {
-            return true;
-        }
-
-        // Second check: Exclude stages that should never show accumulated times
-        $excludedStages = [
-            'Minor Final', 'Minor final', 'minor final',
-            'Semi Final', 'Semifinal', 'semi final', 'semifinal',
-            'Quarter Final', 'Quarterfinal', 'quarter final', 'quarterfinal',
-            'Consolation Final', 'consolation final'
-        ];
-
-        if (in_array($this->stage, $excludedStages, true)) {
-            return false;
-        }
-
-        // Third check: For numbered rounds/heats, show only if it's the last in sequence
-        // This matches the logic for determining if it's the final round
+        // Show accumulated time only if this is the chronologically last round
+        // This uses the same logic as isFinalRound() but without the exact stage name matches
         return $this->isHighestRaceNumberInDiscipline();
     }
 
