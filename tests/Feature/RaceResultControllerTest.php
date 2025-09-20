@@ -822,4 +822,284 @@ class RaceResultControllerTest extends TestCase
             'race_number' => 1
         ]);
     }
+
+    /**
+     * Test that show_accumulated_time field is correctly returned for Final stages.
+     */
+    public function test_show_accumulated_time_field_for_final_stages()
+    {
+        // Create test data
+        $event = Event::factory()->create();
+        $discipline = Discipline::factory()->create(['event_id' => $event->id]);
+
+        // Create races with different stages
+        $finalRace = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'Final',
+            'race_number' => 1
+        ]);
+
+        $grandFinalRace = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'Grand Final',
+            'race_number' => 2
+        ]);
+
+        // Test API responses include show_accumulated_time field
+        $response = $this->getJson("/api/race-results?event_id={$event->id}");
+
+        $response->assertStatus(200);
+        $data = $response->json('data');
+
+        // Find the Final race and verify show_accumulated_time is true
+        $finalRaceData = collect($data)->firstWhere('stage', 'Final');
+        $this->assertNotNull($finalRaceData);
+        $this->assertTrue($finalRaceData['show_accumulated_time'], 'Final stage should show accumulated time');
+
+        // Find the Grand Final race and verify show_accumulated_time is true
+        $grandFinalRaceData = collect($data)->firstWhere('stage', 'Grand Final');
+        $this->assertNotNull($grandFinalRaceData);
+        $this->assertTrue($grandFinalRaceData['show_accumulated_time'], 'Grand Final stage should show accumulated time');
+    }
+
+    /**
+     * Test that show_accumulated_time field is false for excluded stages.
+     */
+    public function test_show_accumulated_time_field_for_excluded_stages()
+    {
+        // Create test data
+        $event = Event::factory()->create();
+        $discipline = Discipline::factory()->create(['event_id' => $event->id]);
+
+        // Create races with excluded stages
+        $minorFinalRace = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'Minor Final',
+            'race_number' => 1
+        ]);
+
+        $semiFinalRace = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'Semi Final',
+            'race_number' => 2
+        ]);
+
+        $quarterFinalRace = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'Quarter Final',
+            'race_number' => 3
+        ]);
+
+        // Test API responses include show_accumulated_time field
+        $response = $this->getJson("/api/race-results?event_id={$event->id}");
+
+        $response->assertStatus(200);
+        $data = $response->json('data');
+
+        // Verify excluded stages show_accumulated_time is false
+        $minorFinalData = collect($data)->firstWhere('stage', 'Minor Final');
+        $this->assertNotNull($minorFinalData);
+        $this->assertFalse($minorFinalData['show_accumulated_time'], 'Minor Final stage should not show accumulated time');
+
+        $semiFinalData = collect($data)->firstWhere('stage', 'Semi Final');
+        $this->assertNotNull($semiFinalData);
+        $this->assertFalse($semiFinalData['show_accumulated_time'], 'Semi Final stage should not show accumulated time');
+
+        $quarterFinalData = collect($data)->firstWhere('stage', 'Quarter Final');
+        $this->assertNotNull($quarterFinalData);
+        $this->assertFalse($quarterFinalData['show_accumulated_time'], 'Quarter Final stage should not show accumulated time');
+    }
+
+    /**
+     * Test that show_accumulated_time field is true only for the highest race number in numbered sequences.
+     */
+    public function test_show_accumulated_time_field_for_numbered_sequences()
+    {
+        // Create test data
+        $event = Event::factory()->create();
+        $discipline = Discipline::factory()->create(['event_id' => $event->id]);
+
+        // Create numbered races - Heat 1, Heat 2, Heat 3
+        $heat1 = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'Heat 1',
+            'race_number' => 1
+        ]);
+
+        $heat2 = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'Heat 2',
+            'race_number' => 2
+        ]);
+
+        $heat3 = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'Heat 3',
+            'race_number' => 3 // This should be the highest and show accumulated time
+        ]);
+
+        // Test API responses
+        $response = $this->getJson("/api/race-results?event_id={$event->id}");
+
+        $response->assertStatus(200);
+        $data = $response->json('data');
+
+        // Heat 1 and Heat 2 should NOT show accumulated time (not the highest race number)
+        $heat1Data = collect($data)->firstWhere('stage', 'Heat 1');
+        $this->assertNotNull($heat1Data);
+        $this->assertFalse($heat1Data['show_accumulated_time'], 'Heat 1 should not show accumulated time (not highest race number)');
+
+        $heat2Data = collect($data)->firstWhere('stage', 'Heat 2');
+        $this->assertNotNull($heat2Data);
+        $this->assertFalse($heat2Data['show_accumulated_time'], 'Heat 2 should not show accumulated time (not highest race number)');
+
+        // Heat 3 SHOULD show accumulated time (highest race number)
+        $heat3Data = collect($data)->firstWhere('stage', 'Heat 3');
+        $this->assertNotNull($heat3Data);
+        $this->assertTrue($heat3Data['show_accumulated_time'], 'Heat 3 should show accumulated time (highest race number)');
+    }
+
+    /**
+     * Test that show_accumulated_time field is included in single race result endpoint.
+     */
+    public function test_show_accumulated_time_field_in_single_race_result()
+    {
+        // Create test data
+        $event = Event::factory()->create();
+        $discipline = Discipline::factory()->create(['event_id' => $event->id]);
+
+        // Create a Final race
+        $finalRace = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'Final',
+            'race_number' => 1
+        ]);
+
+        // Test single race result endpoint
+        $response = $this->getJson("/api/race-results/{$finalRace->id}");
+
+        $response->assertStatus(200)
+            ->assertJson([
+                'success' => true,
+                'data' => [
+                    'id' => $finalRace->id,
+                    'stage' => 'Final',
+                    'show_accumulated_time' => true
+                ]
+            ]);
+    }
+
+    /**
+     * Test that show_accumulated_time field is included in crew results endpoint.
+     */
+    public function test_show_accumulated_time_field_in_crew_results_endpoint()
+    {
+        // Create test data
+        $event = Event::factory()->create();
+        $discipline = Discipline::factory()->create(['event_id' => $event->id]);
+
+        // Create a Grand Final race
+        $grandFinalRace = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'Grand Final',
+            'race_number' => 1
+        ]);
+
+        // Test crew results endpoint
+        $response = $this->getJson("/api/race-results/{$grandFinalRace->id}/crew-results");
+
+        $response->assertStatus(200)
+            ->assertJson([
+                'success' => true,
+                'show_accumulated_time' => true,
+                'message' => 'Crew results retrieved successfully'
+            ]);
+    }
+
+    /**
+     * Test shouldShowAccumulatedTime method directly on the model.
+     */
+    public function test_should_show_accumulated_time_model_method()
+    {
+        // Create test data
+        $event = Event::factory()->create();
+        $discipline = Discipline::factory()->create(['event_id' => $event->id]);
+
+        // Test Final stage (should always return true)
+        $finalRace = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'Final',
+            'race_number' => 1
+        ]);
+        $this->assertTrue($finalRace->shouldShowAccumulatedTime(), 'Final stage should show accumulated time');
+
+        // Test Grand Final stage (should always return true)
+        $grandFinalRace = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'Grand Final',
+            'race_number' => 2
+        ]);
+        $this->assertTrue($grandFinalRace->shouldShowAccumulatedTime(), 'Grand Final stage should show accumulated time');
+
+        // Test Minor Final (should always return false)
+        $minorFinalRace = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'Minor Final',
+            'race_number' => 3
+        ]);
+        $this->assertFalse($minorFinalRace->shouldShowAccumulatedTime(), 'Minor Final stage should not show accumulated time');
+
+        // Test Semi Final (should always return false)
+        $semiFinalRace = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'Semi Final',
+            'race_number' => 4
+        ]);
+        $this->assertFalse($semiFinalRace->shouldShowAccumulatedTime(), 'Semi Final stage should not show accumulated time');
+
+        // Test numbered sequence - only highest should return true
+        $heat1 = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'Heat 1',
+            'race_number' => 5 // Lower race number
+        ]);
+
+        $heat2 = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'Heat 2',
+            'race_number' => 6 // Highest race number for this discipline
+        ]);
+
+        $this->assertFalse($heat1->shouldShowAccumulatedTime(), 'Heat 1 should not show accumulated time (not highest race number)');
+        $this->assertTrue($heat2->shouldShowAccumulatedTime(), 'Heat 2 should show accumulated time (highest race number)');
+    }
+
+    /**
+     * Test show_accumulated_time accessor attribute.
+     */
+    public function test_show_accumulated_time_accessor_attribute()
+    {
+        // Create test data
+        $event = Event::factory()->create();
+        $discipline = Discipline::factory()->create(['event_id' => $event->id]);
+
+        // Test Final stage
+        $finalRace = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'Final',
+            'race_number' => 1
+        ]);
+
+        // Test that the accessor works correctly
+        $this->assertTrue($finalRace->show_accumulated_time, 'show_accumulated_time accessor should return true for Final stage');
+
+        // Test that it's included in toArray output
+        $raceArray = $finalRace->toArray();
+        $this->assertArrayHasKey('show_accumulated_time', $raceArray);
+        $this->assertTrue($raceArray['show_accumulated_time']);
+
+        // Test that it's included in JSON output
+        $raceJson = $finalRace->toJson();
+        $this->assertStringContainsString('"show_accumulated_time":true', $raceJson);
+    }
 }

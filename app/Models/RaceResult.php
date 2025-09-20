@@ -24,7 +24,7 @@ class RaceResult extends Model
     /**
      * Appends to array/JSON output.
      */
-    protected $appends = ['title'];
+    protected $appends = ['title', 'show_accumulated_time'];
 
     /**
      * Get the discipline that this race result belongs to.
@@ -281,7 +281,7 @@ class RaceResult extends Model
      *
      * @return bool
      */
-    private function isHighestRaceNumberInDiscipline()
+    public function isHighestRaceNumberInDiscipline()
     {
         // Get the highest race number for this discipline
         $highestRaceNumber = RaceResult::where('discipline_id', $this->discipline_id)
@@ -301,6 +301,49 @@ class RaceResult extends Model
         return $isHighest;
     }
 
+
+    /**
+     * Determine whether accumulated times should be shown for this race.
+     * Based on frontend logic: show total for exact "Final" and "Grand Final" stages (always),
+     * show total for numbered rounds/heats only if it's the last in sequence,
+     * don't show total for other stages (Minor Final, Semi Final, etc.)
+     *
+     * @return bool
+     */
+    public function shouldShowAccumulatedTime()
+    {
+        // First check: Exact stage name matches for "Final" and "Grand Final"
+        $alwaysShowStages = ['Final', 'Grand Final'];
+        if (in_array($this->stage, $alwaysShowStages, true)) {
+            return true;
+        }
+
+        // Second check: Exclude stages that should never show accumulated times
+        $excludedStages = [
+            'Minor Final', 'Minor final', 'minor final',
+            'Semi Final', 'Semifinal', 'semi final', 'semifinal',
+            'Quarter Final', 'Quarterfinal', 'quarter final', 'quarterfinal',
+            'Consolation Final', 'consolation final'
+        ];
+
+        if (in_array($this->stage, $excludedStages, true)) {
+            return false;
+        }
+
+        // Third check: For numbered rounds/heats, show only if it's the last in sequence
+        // This matches the logic for determining if it's the final round
+        return $this->isHighestRaceNumberInDiscipline();
+    }
+
+    /**
+     * Accessor for the show_accumulated_time appended attribute.
+     *
+     * @return bool
+     */
+    public function getShowAccumulatedTimeAttribute()
+    {
+        return $this->shouldShowAccumulatedTime();
+    }
 
     /**
      * Get final accumulated times for all crews in this discipline.

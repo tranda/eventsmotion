@@ -58,6 +58,7 @@ class RaceResultController extends BaseController
                 // Replace the standard crew_results with enhanced version
                 $raceResult->crew_results = $allCrewResults;
                 $raceResult->is_final_round = $raceResult->isFinalRound();
+                $raceResult->show_accumulated_time = $raceResult->shouldShowAccumulatedTime();
 
                 return $raceResult;
             });
@@ -99,6 +100,7 @@ class RaceResultController extends BaseController
             // Add enhanced data to the race result object
             $raceResult->crew_results = $enhancedCrewResults;
             $raceResult->is_final_round = $raceResult->isFinalRound();
+            $raceResult->show_accumulated_time = $raceResult->shouldShowAccumulatedTime();
 
             return response()->json([
                 'success' => true,
@@ -242,6 +244,7 @@ class RaceResultController extends BaseController
                 'success' => true,
                 'data' => $enhancedCrewResults,
                 'is_final_round' => $raceResult->isFinalRound(),
+                'show_accumulated_time' => $raceResult->shouldShowAccumulatedTime(),
                 'message' => 'Crew results retrieved successfully'
             ], 200);
 
