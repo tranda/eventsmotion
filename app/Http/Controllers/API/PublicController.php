@@ -367,8 +367,10 @@ class PublicController extends BaseController
                     ->header('Access-Control-Allow-Headers', 'Content-Type, Accept');
             }
 
-            // Get all crew results (including crews without results) - same as authenticated API
-            $allCrewResults = $raceResult->allCrewResults();
+            // Get crew results for this specific race only (same as list view)
+            $allCrewResults = $raceResult->crewResults()
+                ->with(['crew.team', 'crew.discipline'])
+                ->get();
 
             // Convert race result to array for proper JSON serialization
             $raceResultArray = $raceResult->toArray();
