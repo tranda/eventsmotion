@@ -275,29 +275,21 @@ class PublicController extends BaseController
                     // Convert the collection to array format that can be JSON serialized
                     $enhancedCrewResults = $allCrewResults->map(function($crewResult) {
                         // Handle both actual CrewResult models and virtual objects
-                        $result = [];
-
                         if (is_object($crewResult)) {
-                            $result = [
-                                'id' => $crewResult->id ?? null,
-                                'crew_id' => $crewResult->crew_id ?? null,
-                                'race_result_id' => $crewResult->race_result_id ?? null,
-                                'lane' => $crewResult->lane ?? null,
-                                'position' => $crewResult->position ?? null,
-                                'time_ms' => $crewResult->time_ms ?? null,
-                                'delay_after_first' => $crewResult->delay_after_first ?? null,
-                                'status' => $crewResult->status ?? null,
-                                'created_at' => $crewResult->created_at ?? null,
-                                'updated_at' => $crewResult->updated_at ?? null,
-                                'crew' => $crewResult->crew ?? null,
-                                // Add final time fields
-                                'final_time_ms' => $crewResult->final_time_ms ?? null,
-                                'final_status' => $crewResult->final_status ?? null,
-                                'is_final_round' => $crewResult->is_final_round ?? false,
-                            ];
+                            // Convert to array and explicitly add final time fields
+                            $result = $crewResult instanceof \Illuminate\Database\Eloquent\Model
+                                ? $crewResult->toArray()
+                                : (array) $crewResult;
+
+                            // Ensure final time fields are included
+                            $result['final_time_ms'] = $crewResult->final_time_ms ?? null;
+                            $result['final_status'] = $crewResult->final_status ?? null;
+                            $result['is_final_round'] = $crewResult->is_final_round ?? false;
+
+                            return $result;
                         }
 
-                        return $result;
+                        return null;
                     })->filter()->values();
 
                     // Replace the standard crew_results with enhanced version
