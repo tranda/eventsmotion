@@ -304,15 +304,19 @@ class RaceResult extends Model
 
     /**
      * Determine whether accumulated times should be shown for this race.
-     * Accumulated times should ONLY be shown for the chronologically last round
-     * in a discipline sequence, regardless of the stage name.
+     * Accumulated times should ONLY be shown for stages that contain "Round"
+     * in the name AND are the chronologically last round in a discipline sequence.
      *
      * @return bool
      */
     public function shouldShowAccumulatedTime()
     {
-        // Show accumulated time only if this is the chronologically last round
-        // This uses the same logic as isFinalRound() but without the exact stage name matches
+        // First check: The stage name must contain "Round" (case insensitive)
+        if (stripos($this->stage, 'Round') === false) {
+            return false;
+        }
+
+        // Second check: It must be the chronologically last round (highest race number)
         return $this->isHighestRaceNumberInDiscipline();
     }
 

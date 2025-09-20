@@ -856,10 +856,10 @@ class RaceResultControllerTest extends TestCase
         $this->assertNotNull($finalRaceData);
         $this->assertFalse($finalRaceData['show_accumulated_time'], 'Final stage should NOT show accumulated time when not the last round');
 
-        // Find the Grand Final race and verify show_accumulated_time is true (it is the last round)
+        // Find the Grand Final race and verify show_accumulated_time is false (doesn't contain "Round")
         $grandFinalRaceData = collect($data)->firstWhere('stage', 'Grand Final');
         $this->assertNotNull($grandFinalRaceData);
-        $this->assertTrue($grandFinalRaceData['show_accumulated_time'], 'Grand Final stage should show accumulated time when it is the last round');
+        $this->assertFalse($grandFinalRaceData['show_accumulated_time'], 'Grand Final stage should NOT show accumulated time (does not contain "Round")');
     }
 
     /**
@@ -907,7 +907,7 @@ class RaceResultControllerTest extends TestCase
 
         $quarterFinalData = collect($data)->firstWhere('stage', 'Quarter Final');
         $this->assertNotNull($quarterFinalData);
-        $this->assertTrue($quarterFinalData['show_accumulated_time'], 'Quarter Final stage should show accumulated time when it is the last round');
+        $this->assertFalse($quarterFinalData['show_accumulated_time'], 'Quarter Final stage should NOT show accumulated time (does not contain "Round")');
     }
 
     /**
@@ -953,10 +953,10 @@ class RaceResultControllerTest extends TestCase
         $this->assertNotNull($heat2Data);
         $this->assertFalse($heat2Data['show_accumulated_time'], 'Heat 2 should not show accumulated time (not highest race number)');
 
-        // Heat 3 SHOULD show accumulated time (highest race number)
+        // Heat 3 should NOT show accumulated time (doesn't contain "Round")
         $heat3Data = collect($data)->firstWhere('stage', 'Heat 3');
         $this->assertNotNull($heat3Data);
-        $this->assertTrue($heat3Data['show_accumulated_time'], 'Heat 3 should show accumulated time (highest race number)');
+        $this->assertFalse($heat3Data['show_accumulated_time'], 'Heat 3 should NOT show accumulated time (does not contain "Round")');
     }
 
     /**
@@ -968,22 +968,22 @@ class RaceResultControllerTest extends TestCase
         $event = Event::factory()->create();
         $discipline = Discipline::factory()->create(['event_id' => $event->id]);
 
-        // Create a Final race that IS the chronologically last race
-        $finalRace = RaceResult::factory()->create([
+        // Create a Round 3 race that IS the chronologically last race
+        $round3Race = RaceResult::factory()->create([
             'discipline_id' => $discipline->id,
-            'stage' => 'Final',
+            'stage' => 'Round 3',
             'race_number' => 1 // Only race, so it's the last
         ]);
 
         // Test single race result endpoint
-        $response = $this->getJson("/api/race-results/{$finalRace->id}");
+        $response = $this->getJson("/api/race-results/{$round3Race->id}");
 
         $response->assertStatus(200)
             ->assertJson([
                 'success' => true,
                 'data' => [
-                    'id' => $finalRace->id,
-                    'stage' => 'Final',
+                    'id' => $round3Race->id,
+                    'stage' => 'Round 3',
                     'show_accumulated_time' => true
                 ]
             ]);
@@ -998,15 +998,15 @@ class RaceResultControllerTest extends TestCase
         $event = Event::factory()->create();
         $discipline = Discipline::factory()->create(['event_id' => $event->id]);
 
-        // Create a Grand Final race that IS the chronologically last race
-        $grandFinalRace = RaceResult::factory()->create([
+        // Create a Round 2 race that IS the chronologically last race
+        $round2Race = RaceResult::factory()->create([
             'discipline_id' => $discipline->id,
-            'stage' => 'Grand Final',
+            'stage' => 'Round 2',
             'race_number' => 1 // Only race, so it's the last
         ]);
 
         // Test crew results endpoint
-        $response = $this->getJson("/api/race-results/{$grandFinalRace->id}/crew-results");
+        $response = $this->getJson("/api/race-results/{$round2Race->id}/crew-results");
 
         $response->assertStatus(200)
             ->assertJson([
@@ -1025,52 +1025,139 @@ class RaceResultControllerTest extends TestCase
         $event = Event::factory()->create();
         $discipline = Discipline::factory()->create(['event_id' => $event->id]);
 
-        // Test Final stage when it's NOT the highest race number (should return false)
+        // Test Final stage - should return false (doesn't contain "Round")
         $finalRace = RaceResult::factory()->create([
             'discipline_id' => $discipline->id,
             'stage' => 'Final',
             'race_number' => 1
         ]);
+        $this->assertFalse($finalRace->shouldShowAccumulatedTime(), 'Final stage should NOT show accumulated time (does not contain "Round")');
 
-        // Create a higher race number to make Final NOT the last round
-        $laterRace = RaceResult::factory()->create([
+        // Test Heat stage - should return false (doesn't contain "Round")
+        $heatRace = RaceResult::factory()->create([
             'discipline_id' => $discipline->id,
             'stage' => 'Heat 3',
             'race_number' => 2
         ]);
+        $this->assertFalse($heatRace->shouldShowAccumulatedTime(), 'Heat stage should NOT show accumulated time (does not contain "Round")');
 
-        $this->assertFalse($finalRace->shouldShowAccumulatedTime(), 'Final stage should NOT show accumulated time when not the last round');
-        $this->assertTrue($laterRace->shouldShowAccumulatedTime(), 'Later race should show accumulated time when it is the last round');
-
-        // Test Grand Final stage when it IS the highest race number (should return true)
+        // Test Grand Final stage - should return false (doesn't contain "Round")
         $grandFinalRace = RaceResult::factory()->create([
             'discipline_id' => $discipline->id,
             'stage' => 'Grand Final',
-            'race_number' => 3 // Highest race number
+            'race_number' => 3
         ]);
-        $this->assertTrue($grandFinalRace->shouldShowAccumulatedTime(), 'Grand Final stage should show accumulated time when it is the last round');
+        $this->assertFalse($grandFinalRace->shouldShowAccumulatedTime(), 'Grand Final stage should NOT show accumulated time (does not contain "Round")');
 
-        // Test Minor Final when it's the highest race number (should return true - only chronology matters)
-        $minorFinalRace = RaceResult::factory()->create([
+        // Test Round 1 when NOT the highest race number - should return false
+        $round1Race = RaceResult::factory()->create([
             'discipline_id' => $discipline->id,
-            'stage' => 'Minor Final',
-            'race_number' => 4 // Highest race number
+            'stage' => 'Round 1',
+            'race_number' => 4
         ]);
-        $this->assertTrue($minorFinalRace->shouldShowAccumulatedTime(), 'Minor Final stage should show accumulated time when it is the last round');
 
-        // Test Semi Final when NOT the highest race number (should return false)
-        $semiFinalRace = RaceResult::factory()->create([
+        $round2Race = RaceResult::factory()->create([
             'discipline_id' => $discipline->id,
-            'stage' => 'Semi Final',
-            'race_number' => 1 // Not the highest
-        ]);
-        $finalAfterSemi = RaceResult::factory()->create([
-            'discipline_id' => $discipline->id,
-            'stage' => 'Final',
+            'stage' => 'Round 2',
             'race_number' => 5 // Highest race number
         ]);
-        $this->assertFalse($semiFinalRace->shouldShowAccumulatedTime(), 'Semi Final stage should not show accumulated time when not the last round');
-        $this->assertTrue($finalAfterSemi->shouldShowAccumulatedTime(), 'Final after Semi Final should show accumulated time when it is the last round');
+
+        $this->assertFalse($round1Race->shouldShowAccumulatedTime(), 'Round 1 should NOT show accumulated time when not the last round');
+        $this->assertTrue($round2Race->shouldShowAccumulatedTime(), 'Round 2 should show accumulated time when it is the last round and contains "Round"');
+
+        // Test Round 3 when it IS the highest race number - should return true
+        $round3Race = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'Round 3',
+            'race_number' => 6 // Highest race number
+        ]);
+        $this->assertTrue($round3Race->shouldShowAccumulatedTime(), 'Round 3 should show accumulated time when it is the last round and contains "Round"');
+
+        // Test "Final Round" stage - should work (contains "Round")
+        $finalRoundRace = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'Final Round',
+            'race_number' => 7 // Highest race number
+        ]);
+        $this->assertTrue($finalRoundRace->shouldShowAccumulatedTime(), 'Final Round should show accumulated time when it is the last round and contains "Round"');
+
+        // Test case sensitivity - "round" (lowercase) should also work
+        $lowercaseRoundRace = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'round 4',
+            'race_number' => 8 // Highest race number
+        ]);
+        $this->assertTrue($lowercaseRoundRace->shouldShowAccumulatedTime(), 'Lowercase "round" should show accumulated time when it is the last round');
+    }
+
+    /**
+     * Test the new Round-specific logic for show_accumulated_time.
+     */
+    public function test_show_accumulated_time_round_specific_logic()
+    {
+        // Create test data
+        $event = Event::factory()->create();
+        $discipline = Discipline::factory()->create(['event_id' => $event->id]);
+
+        // Test case: "Round 3" (last round) → should show accumulated time
+        $round3 = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'Round 3',
+            'race_number' => 3 // Highest race number
+        ]);
+
+        // Test case: "Round 2" (not last round) → should NOT show accumulated time
+        $round2 = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'Round 2',
+            'race_number' => 2
+        ]);
+
+        // Test case: "Final" (even if last round) → should NOT show accumulated time
+        $final = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'Final',
+            'race_number' => 4 // Highest race number
+        ]);
+
+        // Test case: "Grand Final" (even if last round) → should NOT show accumulated time
+        $grandFinal = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'Grand Final',
+            'race_number' => 5 // Highest race number
+        ]);
+
+        // Test case: "Minor Final" (even if last round) → should NOT show accumulated time
+        $minorFinal = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'Minor Final',
+            'race_number' => 6 // Highest race number
+        ]);
+
+        // Test case: "Heat 1" (even if last round) → should NOT show accumulated time
+        $heat1 = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'Heat 1',
+            'race_number' => 7 // Highest race number
+        ]);
+
+        // Verify Round 3 (last round) shows accumulated time
+        $this->assertTrue($round3->shouldShowAccumulatedTime(), 'Round 3 (last round) should show accumulated time');
+
+        // Verify Round 2 (not last round) does NOT show accumulated time
+        $this->assertFalse($round2->shouldShowAccumulatedTime(), 'Round 2 (not last round) should NOT show accumulated time');
+
+        // Verify Final (even if last round) does NOT show accumulated time
+        $this->assertFalse($final->shouldShowAccumulatedTime(), 'Final (even if last round) should NOT show accumulated time');
+
+        // Verify Grand Final (even if last round) does NOT show accumulated time
+        $this->assertFalse($grandFinal->shouldShowAccumulatedTime(), 'Grand Final (even if last round) should NOT show accumulated time');
+
+        // Verify Minor Final (even if last round) does NOT show accumulated time
+        $this->assertFalse($minorFinal->shouldShowAccumulatedTime(), 'Minor Final (even if last round) should NOT show accumulated time');
+
+        // Verify Heat 1 (even if last round) does NOT show accumulated time
+        $this->assertFalse($heat1->shouldShowAccumulatedTime(), 'Heat 1 (even if last round) should NOT show accumulated time');
     }
 
     /**
@@ -1082,23 +1169,23 @@ class RaceResultControllerTest extends TestCase
         $event = Event::factory()->create();
         $discipline = Discipline::factory()->create(['event_id' => $event->id]);
 
-        // Test Final stage that IS the chronologically last race
-        $finalRace = RaceResult::factory()->create([
+        // Test Round 1 stage that IS the chronologically last race
+        $round1Race = RaceResult::factory()->create([
             'discipline_id' => $discipline->id,
-            'stage' => 'Final',
+            'stage' => 'Round 1',
             'race_number' => 1 // Only race, so it's the last
         ]);
 
         // Test that the accessor works correctly
-        $this->assertTrue($finalRace->show_accumulated_time, 'show_accumulated_time accessor should return true for chronologically last race');
+        $this->assertTrue($round1Race->show_accumulated_time, 'show_accumulated_time accessor should return true for chronologically last Round stage');
 
         // Test that it's included in toArray output
-        $raceArray = $finalRace->toArray();
+        $raceArray = $round1Race->toArray();
         $this->assertArrayHasKey('show_accumulated_time', $raceArray);
         $this->assertTrue($raceArray['show_accumulated_time']);
 
         // Test that it's included in JSON output
-        $raceJson = $finalRace->toJson();
+        $raceJson = $round1Race->toJson();
         $this->assertStringContainsString('"show_accumulated_time":true', $raceJson);
     }
 }
