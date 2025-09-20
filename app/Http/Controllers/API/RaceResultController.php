@@ -377,6 +377,8 @@ class RaceResultController extends BaseController
      */
     public function bulkUpdate(Request $request)
     {
+        \Log::info('🚀 bulkUpdate method ENTRY at ' . now()->toDateTimeString());
+
         try {
             $request->validate([
                 'races' => 'required|array',
