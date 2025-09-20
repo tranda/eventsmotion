@@ -45,9 +45,15 @@ class RaceResultController extends BaseController
                     ->get();
             }
             
-            // Enhance race results with final round information
+            // Enhance race results with final round information and crew results
             $enhancedRaceResults = $raceResults->map(function($raceResult) {
+                // Get all crew results with final time calculations
+                $allCrewResults = $raceResult->allCrewResults();
+
+                // Replace the standard crew_results with enhanced version
+                $raceResult->crew_results = $allCrewResults;
                 $raceResult->is_final_round = $raceResult->isFinalRound();
+
                 return $raceResult;
             });
 
