@@ -232,9 +232,14 @@ class PublicController extends BaseController
      */
     public function getPublicRaceResults(Request $request)
     {
+        \Log::info('🚀 PublicController getPublicRaceResults called', [
+            'event_id' => $request->query('event_id'),
+            'timestamp' => now()->toDateTimeString()
+        ]);
+
         try {
             $eventId = $request->query('event_id');
-            
+
             if (!$eventId) {
                 return $this->sendError('Event ID is required', [], 422)
                     ->header('Access-Control-Allow-Origin', '*')
@@ -257,9 +262,21 @@ class PublicController extends BaseController
                     ->get();
             }
 
+            // Enhance race results with final round information and crew results
+            $enhancedRaceResults = $raceResults->map(function($raceResult) {
+                // Get all crew results with final time calculations
+                $allCrewResults = $raceResult->allCrewResults();
+
+                // Replace the standard crew_results with enhanced version
+                $raceResult->crew_results = $allCrewResults;
+                $raceResult->is_final_round = $raceResult->isFinalRound();
+
+                return $raceResult;
+            });
+
             return response()->json([
                 'success' => true,
-                'data' => $raceResults,
+                'data' => $enhancedRaceResults,
                 'message' => 'Race results retrieved successfully'
             ], 200)
             ->header('Access-Control-Allow-Origin', '*')
