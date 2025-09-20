@@ -192,7 +192,7 @@ class RaceResult extends Model
 
                 return $virtualResult;
             }
-        })->sortBy(function ($crewResult) {
+        })->sortBy(function ($crewResult) use ($isFinalRound) {
             // For final rounds, sort by final accumulated time, otherwise by current round time
             if ($isFinalRound && isset($crewResult->final_time_ms)) {
                 return [
