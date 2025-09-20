@@ -265,12 +265,22 @@ class PublicController extends BaseController
             // Enhance race results with final round information and crew results
             $enhancedRaceResults = $raceResults->map(function($raceResult) {
                 try {
+                    // Always add is_final_round flag for tracking
+                    $isFinalRound = $raceResult->isFinalRound();
+                    $raceResult->is_final_round = $isFinalRound;
+
                     // Get all crew results with final time calculations
                     $allCrewResults = $raceResult->allCrewResults();
 
                     // Replace the standard crew_results with enhanced version
                     $raceResult->crew_results = $allCrewResults;
-                    $raceResult->is_final_round = $raceResult->isFinalRound();
+
+                    \Log::info('🔍 Race result enhanced', [
+                        'race_id' => $raceResult->id,
+                        'stage' => $raceResult->stage,
+                        'is_final_round' => $isFinalRound,
+                        'crew_results_count' => $allCrewResults->count()
+                    ]);
 
                     return $raceResult;
                 } catch (\Exception $e) {
