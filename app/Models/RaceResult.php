@@ -149,22 +149,37 @@ class RaceResult extends Model
         // Merge registered crews with existing results
         return $registeredCrews->map(function ($crew) use ($existingResults, $isFinalRound, $finalTimes) {
             if ($existingResults->has($crew->id)) {
-                // Return the existing crew result
+                // Get the existing crew result and convert to plain object
                 $crewResult = $existingResults->get($crew->id);
+
+                // Convert to plain object to avoid Eloquent serialization issues
+                $resultObject = (object) [
+                    'id' => $crewResult->id,
+                    'crew_id' => $crewResult->crew_id,
+                    'race_result_id' => $crewResult->race_result_id,
+                    'lane' => $crewResult->lane,
+                    'position' => $crewResult->position,
+                    'time_ms' => $crewResult->time_ms,
+                    'delay_after_first' => $crewResult->delay_after_first,
+                    'status' => $crewResult->status,
+                    'crew' => $crewResult->crew,
+                    'created_at' => $crewResult->created_at,
+                    'updated_at' => $crewResult->updated_at
+                ];
 
                 // Add final round information if applicable
                 if ($isFinalRound && $finalTimes->has($crew->id)) {
                     $finalTimeData = $finalTimes->get($crew->id);
-                    $crewResult->final_time_ms = $finalTimeData['final_time_ms'];
-                    $crewResult->final_status = $finalTimeData['final_status'];
-                    $crewResult->is_final_round = true;
+                    $resultObject->final_time_ms = $finalTimeData['final_time_ms'];
+                    $resultObject->final_status = $finalTimeData['final_status'];
+                    $resultObject->is_final_round = true;
                 } else {
-                    $crewResult->final_time_ms = null;
-                    $crewResult->final_status = null;
-                    $crewResult->is_final_round = $isFinalRound;
+                    $resultObject->final_time_ms = null;
+                    $resultObject->final_status = null;
+                    $resultObject->is_final_round = $isFinalRound;
                 }
 
-                return $crewResult;
+                return $resultObject;
             } else {
                 // Create a virtual crew result for crews without results
                 $virtualResult = (object) [
