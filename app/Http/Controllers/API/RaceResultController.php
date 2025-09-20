@@ -394,7 +394,7 @@ class RaceResultController extends BaseController
                 'perform_cleanup' => 'boolean'
             ]);
 
-            $performCleanup = $request->input('perform_cleanup', false);
+            $performCleanup = $request->input('perform_cleanup', true);
 
             // Use database transaction for safety
             \DB::beginTransaction();
