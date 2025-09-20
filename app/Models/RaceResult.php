@@ -37,7 +37,7 @@ class RaceResult extends Model
     /**
      * Get the title for this race result.
      * Dynamically generates the title from the discipline's display name.
-     * 
+     *
      * @return string
      */
     public function getTitleAttribute()
@@ -45,13 +45,13 @@ class RaceResult extends Model
         if ($this->discipline) {
             return $this->discipline->getDisplayName();
         }
-        
+
         return 'Unknown Race';
     }
 
     /**
      * Alternative method to get the title (for explicit calls).
-     * 
+     *
      * @return string
      */
     public function getTitle()
@@ -212,148 +212,72 @@ class RaceResult extends Model
 
     /**
      * Check if this race result represents the final round for its discipline.
-     * A race is considered the final round if it's the last stage chronologically.
+     * A race is considered the final round if:
+     * 1. Its stage is exactly "Grand Final" or "Final" (exact string matches), OR
+     * 2. It is the chronologically last round in the series for this discipline
+     *
+     * Stages like "Minor Final", "Semi Final", etc. are NOT considered final rounds
+     * unless they happen to be the last round chronologically.
      */
     public function isFinalRound()
     {
-        // Get all race results for this discipline ordered by creation time (most reliable)
-        // and as fallback by stage name with natural sorting
-        $allRounds = RaceResult::where('discipline_id', $this->discipline_id)
-            ->orderBy('created_at')
-            ->orderBy('id') // Secondary sort for deterministic results
-            ->get();
+        // First check: Exact stage name matches for "Final" and "Grand Final"
+        $finalStages = ['Grand Final', 'Final'];
+        $isExactFinalStage = in_array($this->stage, $finalStages, true);
 
-        // If there's only one round, it's the final round
-        if ($allRounds->count() <= 1) {
+        if ($isExactFinalStage) {
+            \Log::info('🏁 Final round determination - exact stage match', [
+                'race_id' => $this->id,
+                'stage' => $this->stage,
+                'discipline_id' => $this->discipline_id,
+                'is_final' => true,
+                'reason' => 'exact_stage_match'
+            ]);
             return true;
         }
 
-        // If stages follow "Round X" pattern, use numeric extraction for better sorting
-        $stageNumbers = $allRounds->map(function($round) {
-            if (preg_match('/Round (\d+)/i', $round->stage, $matches)) {
-                return [
-                    'id' => $round->id,
-                    'stage' => $round->stage,
-                    'round_number' => (int) $matches[1],
-                    'created_at' => $round->created_at
-                ];
-            }
-            return [
-                'id' => $round->id,
-                'stage' => $round->stage,
-                'round_number' => 0, // Non-round stages get 0
-                'created_at' => $round->created_at
-            ];
-        });
-
-        // Sort by round number (highest first), then by creation time (latest first)
-        $sortedRounds = $stageNumbers->sortByDesc(function($round) {
-            return [$round['round_number'], $round['created_at']->timestamp];
-        });
-
-        $lastRound = $sortedRounds->first(); // First after desc sort is the highest/latest
-        $isFinal = $lastRound['id'] === $this->id;
+        // Second check: Is this the chronologically last round in the discipline?
+        $isLastRound = $this->isLastRoundInDiscipline();
 
         \Log::info('🏁 Final round determination', [
             'race_id' => $this->id,
             'stage' => $this->stage,
             'discipline_id' => $this->discipline_id,
-            'all_rounds_count' => $allRounds->count(),
-            'last_round_id' => $lastRound['id'],
-            'last_round_stage' => $lastRound['stage'],
-            'last_round_number' => $lastRound['round_number'],
-            'is_final' => $isFinal,
-            'all_rounds' => $stageNumbers->map(function($round) {
-                return [
-                    'id' => $round['id'],
-                    'stage' => $round['stage'],
-                    'round_number' => $round['round_number']
-                ];
-            })->toArray()
+            'is_exact_final_stage' => $isExactFinalStage,
+            'is_last_round' => $isLastRound,
+            'is_final' => $isLastRound,
+            'reason' => $isLastRound ? 'last_round_chronologically' : 'not_final'
         ]);
 
-        return $isFinal;
+        return $isLastRound;
     }
 
     /**
-     * Debug version of isFinalRound() with logging for troubleshooting.
-     * Use this temporarily to debug final round detection issues.
+     * Check if this race result is the chronologically last round in its discipline.
+     * Uses creation time and ID as tiebreakers for consistent ordering.
+     *
+     * @return bool
      */
-    public function isFinalRoundDebug()
+    private function isLastRoundInDiscipline()
     {
         // Get all race results for this discipline ordered by creation time (most reliable)
-        // and as fallback by stage name with natural sorting
+        // and as fallback by ID for deterministic results
         $allRounds = RaceResult::where('discipline_id', $this->discipline_id)
-            ->orderBy('created_at')
-            ->orderBy('id') // Secondary sort for deterministic results
+            ->orderBy('created_at', 'desc')
+            ->orderBy('id', 'desc') // Secondary sort for deterministic results
             ->get();
 
         // If there's only one round, it's the final round
         if ($allRounds->count() <= 1) {
-            \Log::info('Single round detected as final', [
-                'race_id' => $this->id,
-                'stage' => $this->stage,
-                'discipline_id' => $this->discipline_id
-            ]);
             return true;
         }
 
-        // For debugging: log the current state
-        \Log::info('Checking final round', [
-            'current_race_id' => $this->id,
-            'current_stage' => $this->stage,
-            'discipline_id' => $this->discipline_id,
-            'all_rounds' => $allRounds->map(function($round) {
-                return [
-                    'id' => $round->id,
-                    'stage' => $round->stage,
-                    'created_at' => $round->created_at->toDateTimeString()
-                ];
-            })->toArray()
-        ]);
+        // The first record in the desc-ordered collection is the latest/last round
+        $lastRound = $allRounds->first();
 
-        // If stages follow "Round X" pattern, use numeric extraction for better sorting
-        $stageNumbers = $allRounds->map(function($round) {
-            if (preg_match('/Round (\d+)/i', $round->stage, $matches)) {
-                return [
-                    'id' => $round->id,
-                    'stage' => $round->stage,
-                    'round_number' => (int) $matches[1],
-                    'created_at' => $round->created_at
-                ];
-            }
-            return [
-                'id' => $round->id,
-                'stage' => $round->stage,
-                'round_number' => 0, // Non-round stages get 0
-                'created_at' => $round->created_at
-            ];
-        });
-
-        // Sort by round number (highest first), then by creation time (latest first)
-        $sortedRounds = $stageNumbers->sortByDesc(function($round) {
-            return [$round['round_number'], $round['created_at']->timestamp];
-        });
-
-        $lastRound = $sortedRounds->first(); // First after desc sort is the highest/latest
-        $isFinal = $lastRound['id'] === $this->id;
-
-        \Log::info('Final round determination', [
-            'last_round_id' => $lastRound['id'],
-            'last_round_stage' => $lastRound['stage'],
-            'last_round_number' => $lastRound['round_number'],
-            'current_is_final' => $isFinal,
-            'sorted_rounds' => $sortedRounds->map(function($round) {
-                return [
-                    'id' => $round['id'],
-                    'stage' => $round['stage'],
-                    'round_number' => $round['round_number']
-                ];
-            })->toArray()
-        ]);
-
-        return $isFinal;
+        return $lastRound->id === $this->id;
     }
+
 
     /**
      * Get final accumulated times for all crews in this discipline.
