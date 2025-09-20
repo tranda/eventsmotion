@@ -23,6 +23,11 @@ class RaceResultController extends BaseController
      */
     public function index(Request $request)
     {
+        \Log::info('🚀 RaceResultController index method called', [
+            'event_id' => $request->query('event_id'),
+            'timestamp' => now()->toDateTimeString()
+        ]);
+
         try {
             $eventId = $request->query('event_id');
             
