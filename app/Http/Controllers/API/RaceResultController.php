@@ -448,18 +448,40 @@ class RaceResultController extends BaseController
                 }
 
                 // Perform discipline-specific cleanup if requested
+                \Log::info('Cleanup check', [
+                    'perform_cleanup' => $performCleanup,
+                    'disciplines_processed_count' => count($disciplinesProcessed),
+                    'disciplines_processed' => $disciplinesProcessed->pluck('id')->toArray()
+                ]);
+
                 if ($performCleanup) {
+                    \Log::info('Starting cleanup for disciplines', [
+                        'discipline_ids' => $disciplinesProcessed->pluck('id')->toArray()
+                    ]);
+
                     foreach ($disciplinesProcessed as $discipline) {
                         // Get stages for this discipline from import data
                         $disciplineStages = collect($request->races)
                             ->filter(function($race) use ($discipline, $request) {
                                 $raceDiscParams = $this->extractDisciplineParams($race, $request->event_id);
-                                return $this->disciplineMatches($discipline, $raceDiscParams);
+                                $matches = $this->disciplineMatches($discipline, $raceDiscParams);
+                                \Log::info('Discipline matching', [
+                                    'discipline_id' => $discipline->id,
+                                    'race_stage' => $race['stage'],
+                                    'race_params' => $raceDiscParams,
+                                    'matches' => $matches
+                                ]);
+                                return $matches;
                             })
                             ->pluck('stage')
                             ->unique()
                             ->values()
                             ->toArray();
+
+                        \Log::info('Stages for discipline cleanup', [
+                            'discipline_id' => $discipline->id,
+                            'stages_in_import' => $disciplineStages
+                        ]);
 
                         $disciplineCleanup = $this->performRaceCleanup($discipline->id, collect($request->races)->filter(function($race) use ($discipline, $request) {
                             $raceDiscParams = $this->extractDisciplineParams($race, $request->event_id);
