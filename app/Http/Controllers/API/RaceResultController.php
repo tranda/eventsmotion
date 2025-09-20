@@ -467,45 +467,12 @@ class RaceResultController extends BaseController
                 ]);
 
                 if ($performCleanup) {
-                    \Log::info('Starting cleanup for disciplines', [
-                        'discipline_ids' => $disciplinesProcessed->pluck('id')->toArray()
-                    ]);
-
-                    // First, let's see what races exist for this event before cleanup
-                    $allEventRaces = RaceResult::whereHas('discipline', function($q) use ($request) {
-                        $q->where('event_id', $request->event_id);
-                    })->with('discipline')->get();
-
-                    \Log::info('All races in event before cleanup', [
-                        'event_id' => $request->event_id,
-                        'total_races' => $allEventRaces->count(),
-                        'races' => $allEventRaces->map(function($race) {
-                            return [
-                                'id' => $race->id,
-                                'race_number' => $race->race_number,
-                                'stage' => $race->stage,
-                                'status' => $race->status,
-                                'discipline_id' => $race->discipline_id,
-                                'boat_group' => $race->discipline->boat_group,
-                                'age_group' => $race->discipline->age_group,
-                                'gender_group' => $race->discipline->gender_group
-                            ];
-                        })->toArray()
-                    ]);
-
                     foreach ($disciplinesProcessed as $discipline) {
                         // Get stages for this discipline from import data
                         $disciplineStages = collect($request->races)
                             ->filter(function($race) use ($discipline, $request) {
                                 $raceDiscParams = $this->extractDisciplineParams($race, $request->event_id);
-                                $matches = $this->disciplineMatches($discipline, $raceDiscParams);
-                                \Log::info('Discipline matching', [
-                                    'discipline_id' => $discipline->id,
-                                    'race_stage' => $race['stage'],
-                                    'race_params' => $raceDiscParams,
-                                    'matches' => $matches
-                                ]);
-                                return $matches;
+                                return $this->disciplineMatches($discipline, $raceDiscParams);
                             })
                             ->pluck('stage')
                             ->unique()

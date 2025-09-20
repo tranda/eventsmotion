@@ -127,7 +127,7 @@ class RaceResult extends Model
         // Check if this is the final round for this discipline
         $isFinalRound = $this->isFinalRound();
 
-        \Log::info('Final round check for race', [
+        \Log::info('🏁 Final round check for race', [
             'race_id' => $this->id,
             'stage' => $this->stage,
             'discipline_id' => $this->discipline_id,
@@ -136,6 +136,15 @@ class RaceResult extends Model
 
         // Get final times if this is the final round
         $finalTimes = $isFinalRound ? $this->getFinalTimesForDiscipline() : collect();
+
+        if ($isFinalRound) {
+            \Log::info('🏁 Final times calculated', [
+                'race_id' => $this->id,
+                'stage' => $this->stage,
+                'final_times_count' => $finalTimes->count(),
+                'final_times' => $finalTimes->toArray()
+            ]);
+        }
 
         // Merge registered crews with existing results
         return $registeredCrews->map(function ($crew) use ($existingResults, $isFinalRound, $finalTimes) {
@@ -243,7 +252,27 @@ class RaceResult extends Model
         });
 
         $lastRound = $sortedRounds->first(); // First after desc sort is the highest/latest
-        return $lastRound['id'] === $this->id;
+        $isFinal = $lastRound['id'] === $this->id;
+
+        \Log::info('🏁 Final round determination', [
+            'race_id' => $this->id,
+            'stage' => $this->stage,
+            'discipline_id' => $this->discipline_id,
+            'all_rounds_count' => $allRounds->count(),
+            'last_round_id' => $lastRound['id'],
+            'last_round_stage' => $lastRound['stage'],
+            'last_round_number' => $lastRound['round_number'],
+            'is_final' => $isFinal,
+            'all_rounds' => $stageNumbers->map(function($round) {
+                return [
+                    'id' => $round['id'],
+                    'stage' => $round['stage'],
+                    'round_number' => $round['round_number']
+                ];
+            })->toArray()
+        ]);
+
+        return $isFinal;
     }
 
     /**
