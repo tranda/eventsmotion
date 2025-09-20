@@ -372,8 +372,35 @@ class PublicController extends BaseController
                 ->with(['crew.team', 'crew.discipline'])
                 ->get();
 
+            // Check if this is a final round that needs accumulated times
+            $isFinalRound = $raceResult->isFinalRound();
+
+            // Get final times if this is a final round
+            if ($isFinalRound) {
+                $finalTimes = $raceResult->getFinalTimesForDiscipline();
+
+                // Add final time data to crew results
+                $crewResults = $crewResults->map(function($crewResult) use ($finalTimes) {
+                    if ($finalTimes->has($crewResult->crew_id)) {
+                        $finalTimeData = $finalTimes->get($crewResult->crew_id);
+                        $crewResult->final_time_ms = $finalTimeData['final_time_ms'];
+                        $crewResult->final_status = $finalTimeData['final_status'];
+                        $crewResult->is_final_round = true;
+                    } else {
+                        $crewResult->final_time_ms = null;
+                        $crewResult->final_status = null;
+                        $crewResult->is_final_round = true;
+                    }
+                    return $crewResult;
+                });
+            }
+
             // Convert race result to array for proper JSON serialization
             $raceResultArray = $raceResult->toArray();
+
+            // Add additional properties
+            $raceResultArray['is_final_round'] = $isFinalRound;
+            $raceResultArray['show_accumulated_time'] = $raceResult->shouldShowAccumulatedTime();
 
             // Add properly serialized crew results (handle Eloquent models)
             $raceResultArray['crew_results'] = $crewResults->map(function($crewResult) {

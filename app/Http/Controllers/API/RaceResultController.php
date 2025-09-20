@@ -53,7 +53,9 @@ class RaceResultController extends BaseController
             // Enhance race results with final round information and crew results
             $enhancedRaceResults = $raceResults->map(function($raceResult) {
                 // Get all crew results with final time calculations
-                $allCrewResults = $raceResult->allCrewResults();
+                $allCrewResults = $raceResult->crewResults()
+                    ->with(['crew.team', 'crew.discipline'])
+                    ->get();
 
                 // Convert to array for proper JSON serialization
                 $raceResultArray = $raceResult->toArray();
