@@ -58,10 +58,17 @@ class RaceResultController extends BaseController
                 // Convert to array for proper JSON serialization
                 $raceResultArray = $raceResult->toArray();
 
-                // Add enhanced crew results (already arrays from allCrewResults)
+                // Add enhanced crew results (convert each item to array)
+                // allCrewResults returns mixed objects, so we need to handle them properly
                 $raceResultArray['crew_results'] = $allCrewResults->map(function($crewResult) {
-                    return $crewResult->toArray();
-                });
+                    // Handle both Eloquent models and stdClass objects
+                    if ($crewResult instanceof \Illuminate\Database\Eloquent\Model) {
+                        return $crewResult->toArray();
+                    } else {
+                        // For stdClass objects, cast to array
+                        return (array) $crewResult;
+                    }
+                })->values()->toArray();
 
                 // Add additional computed properties
                 $raceResultArray['is_final_round'] = $raceResult->isFinalRound();
@@ -107,10 +114,8 @@ class RaceResultController extends BaseController
             // Convert to array for proper JSON serialization
             $raceResultArray = $raceResult->toArray();
 
-            // Add enhanced crew results (properly serialized)
-            $raceResultArray['crew_results'] = $enhancedCrewResults->map(function($crewResult) {
-                return $crewResult->toArray();
-            });
+            // Add enhanced crew results (enhanceCrewResultsForResponse already returns an array)
+            $raceResultArray['crew_results'] = $enhancedCrewResults;
 
             // Add additional computed properties
             $raceResultArray['is_final_round'] = $raceResult->isFinalRound();
