@@ -272,14 +272,43 @@ class PublicController extends BaseController
                     // Get all crew results with final time calculations
                     $allCrewResults = $raceResult->allCrewResults();
 
+                    // Convert the collection to array format that can be JSON serialized
+                    $enhancedCrewResults = $allCrewResults->map(function($crewResult) {
+                        // Handle both actual CrewResult models and virtual objects
+                        $result = [];
+
+                        if (is_object($crewResult)) {
+                            $result = [
+                                'id' => $crewResult->id ?? null,
+                                'crew_id' => $crewResult->crew_id ?? null,
+                                'race_result_id' => $crewResult->race_result_id ?? null,
+                                'lane' => $crewResult->lane ?? null,
+                                'position' => $crewResult->position ?? null,
+                                'time_ms' => $crewResult->time_ms ?? null,
+                                'delay_after_first' => $crewResult->delay_after_first ?? null,
+                                'status' => $crewResult->status ?? null,
+                                'created_at' => $crewResult->created_at ?? null,
+                                'updated_at' => $crewResult->updated_at ?? null,
+                                'crew' => $crewResult->crew ?? null,
+                                // Add final time fields
+                                'final_time_ms' => $crewResult->final_time_ms ?? null,
+                                'final_status' => $crewResult->final_status ?? null,
+                                'is_final_round' => $crewResult->is_final_round ?? false,
+                            ];
+                        }
+
+                        return $result;
+                    })->filter()->values();
+
                     // Replace the standard crew_results with enhanced version
-                    $raceResult->crew_results = $allCrewResults;
+                    $raceResult->crew_results = $enhancedCrewResults;
 
                     \Log::info('🔍 Race result enhanced', [
                         'race_id' => $raceResult->id,
                         'stage' => $raceResult->stage,
                         'is_final_round' => $isFinalRound,
-                        'crew_results_count' => $allCrewResults->count()
+                        'crew_results_count' => $enhancedCrewResults->count(),
+                        'first_crew_final_time' => $enhancedCrewResults->first()['final_time_ms'] ?? 'null'
                     ]);
 
                     return $raceResult;
