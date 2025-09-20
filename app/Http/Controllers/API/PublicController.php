@@ -373,10 +373,11 @@ class PublicController extends BaseController
             // Convert race result to array for proper JSON serialization
             $raceResultArray = $raceResult->toArray();
 
-            // Add properly serialized crew results
+            // Add properly serialized crew results (handle stdClass objects)
             $raceResultArray['crew_results'] = $allCrewResults->map(function($crewResult) {
-                return $crewResult->toArray();
-            });
+                // allCrewResults returns stdClass objects, so cast to array
+                return (array) $crewResult;
+            })->values()->toArray();
 
             return response()->json([
                 'success' => true,
