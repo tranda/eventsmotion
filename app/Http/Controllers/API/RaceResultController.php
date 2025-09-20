@@ -10,6 +10,7 @@ use App\Models\Discipline;
 use App\Models\Crew;
 use App\Models\Team;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\DB;
 
 class RaceResultController extends BaseController
 {
@@ -369,7 +370,7 @@ class RaceResultController extends BaseController
     /**
      * Bulk update race plan data.
      * Uses discipline + stage as unique identifier.
-     * 
+     *
      * @param Request $request
      * @return \Illuminate\Http\JsonResponse
      */
@@ -395,14 +396,14 @@ class RaceResultController extends BaseController
 
             foreach ($request->races as $raceData) {
                 \Log::info("Processing race: " . json_encode($raceData));
-                
+
                 // 1. Find or create discipline
                 $discipline = $this->findOrCreateDiscipline($raceData, $request->event_id);
                 \Log::info("Discipline created/found: " . json_encode($discipline->toArray()));
-                
+
                 // 2. Calculate race time
                 $raceTime = $this->calculateRaceTime($raceData['start_time'], $raceData['delay']);
-                
+
                 // 3. Update or create RaceResult using discipline + stage as unique key
                 $raceResult = RaceResult::updateOrCreate(
                     [
@@ -415,12 +416,12 @@ class RaceResultController extends BaseController
                         'status' => 'SCHEDULED'
                     ]
                 );
-                
+
                 // 4. Update crew assignments if lanes are provided
                 if (isset($raceData['lanes']) && is_array($raceData['lanes'])) {
                     $this->updateCrewAssignments($raceResult, $raceData['lanes']);
                 }
-                
+
                 try {
                     $raceResult->load('discipline', 'crewResults.crew.team');
                 } catch (\Exception $e) {
@@ -436,7 +437,7 @@ class RaceResultController extends BaseController
             $cancelledCount = RaceResult::whereHas('discipline', function($query) use ($request) {
                     $query->where('event_id', $request->event_id);
                 })
-                ->whereNotIn('id', $processedRaceIds)  
+                ->whereNotIn('id', $processedRaceIds)
                 ->where('status', '!=', 'FINISHED')
                 ->where('status', '!=', 'CANCELLED')
                 ->update(['status' => 'CANCELLED']);
@@ -456,6 +457,80 @@ class RaceResultController extends BaseController
             return $this->sendError('Validation error', $e->errors(), 422);
         } catch (\Exception $e) {
             return $this->sendError('Error updating race plan', [$e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Bulk import race results with comprehensive cleanup logic.
+     * Safely removes orphaned races and crew results for specific discipline.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function bulkImportWithCleanup(Request $request)
+    {
+        try {
+            $request->validate([
+                'discipline_id' => 'required|exists:disciplines,id',
+                'races' => 'required|array',
+                'races.*.race_number' => 'required|integer',
+                'races.*.start_time' => 'nullable|string',
+                'races.*.delay' => 'nullable|string',
+                'races.*.stage' => 'required|string|max:100',
+                'races.*.status' => 'nullable|in:SCHEDULED,IN_PROGRESS,FINISHED,CANCELLED',
+                'races.*.lanes' => 'nullable|array',
+                'races.*.lanes.*.team' => 'nullable|string',
+                'races.*.lanes.*.time' => 'nullable|string',
+                'perform_cleanup' => 'boolean'
+            ]);
+
+            $disciplineId = $request->discipline_id;
+            $performCleanup = $request->input('perform_cleanup', true);
+
+            // Use database transaction for safety
+            \DB::beginTransaction();
+
+            try {
+                $cleanupResults = [];
+
+                // Step 1: Perform cleanup if requested
+                if ($performCleanup) {
+                    $cleanupResults = $this->performRaceCleanup($disciplineId, $request->races);
+                }
+
+                // Step 2: Process import data
+                $importResults = $this->processRaceImport($disciplineId, $request->races);
+
+                \DB::commit();
+
+                $message = "Race import completed successfully";
+                if (!empty($cleanupResults['deleted_count'])) {
+                    $message .= ". Cleaned up {$cleanupResults['deleted_count']} orphaned races";
+                }
+
+                return response()->json([
+                    'success' => true,
+                    'data' => [
+                        'imported_races' => $importResults,
+                        'cleanup_summary' => $cleanupResults
+                    ],
+                    'message' => $message
+                ], 200);
+
+            } catch (\Exception $e) {
+                \DB::rollBack();
+                throw $e;
+            }
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->sendError('Validation error', $e->errors(), 422);
+        } catch (\Exception $e) {
+            \Log::error('Race import with cleanup failed', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'discipline_id' => $request->discipline_id ?? null
+            ]);
+            return $this->sendError('Error importing race results', [$e->getMessage()], 500);
         }
     }
 
@@ -699,6 +774,132 @@ class RaceResultController extends BaseController
         }
         
         return 0;
+    }
+
+    /**
+     * Perform cleanup of orphaned races for a specific discipline.
+     *
+     * @param int $disciplineId
+     * @param array $importRaces
+     * @return array
+     */
+    private function performRaceCleanup($disciplineId, $importRaces)
+    {
+        // Get stages from import data
+        $importStages = collect($importRaces)->pluck('stage')->unique()->values()->toArray();
+
+        \Log::info('Starting race cleanup', [
+            'discipline_id' => $disciplineId,
+            'import_stages' => $importStages
+        ]);
+
+        // Find races that exist in database but not in import data
+        $orphanedRaces = $this->findOrphanedRaces($disciplineId, $importStages);
+
+        $deletedRaces = [];
+        $deletedCrewResultsCount = 0;
+
+        foreach ($orphanedRaces as $race) {
+            // Count crew results before deletion for logging
+            $crewResultsCount = $race->crewResults()->count();
+            $deletedCrewResultsCount += $crewResultsCount;
+
+            $deletedRaces[] = [
+                'id' => $race->id,
+                'race_number' => $race->race_number,
+                'stage' => $race->stage,
+                'status' => $race->status,
+                'crew_results_count' => $crewResultsCount
+            ];
+
+            \Log::info('Deleting orphaned race', [
+                'race_id' => $race->id,
+                'race_number' => $race->race_number,
+                'stage' => $race->stage,
+                'discipline_id' => $disciplineId,
+                'crew_results_count' => $crewResultsCount
+            ]);
+
+            // Delete the race (crew results will be cascade deleted)
+            $race->delete();
+        }
+
+        \Log::info('Race cleanup completed', [
+            'discipline_id' => $disciplineId,
+            'deleted_races_count' => count($deletedRaces),
+            'deleted_crew_results_count' => $deletedCrewResultsCount
+        ]);
+
+        return [
+            'deleted_count' => count($deletedRaces),
+            'deleted_races' => $deletedRaces,
+            'deleted_crew_results_count' => $deletedCrewResultsCount
+        ];
+    }
+
+    /**
+     * Find races that exist in database but not in import data.
+     *
+     * @param int $disciplineId
+     * @param array $importStages
+     * @return \Illuminate\Database\Eloquent\Collection
+     */
+    private function findOrphanedRaces($disciplineId, $importStages)
+    {
+        return RaceResult::where('discipline_id', $disciplineId)
+            ->whereNotIn('stage', $importStages)
+            ->with(['crewResults']) // Load relationships for counting
+            ->get();
+    }
+
+    /**
+     * Process the race import data.
+     *
+     * @param int $disciplineId
+     * @param array $races
+     * @return array
+     */
+    private function processRaceImport($disciplineId, $races)
+    {
+        $importedRaces = [];
+
+        foreach ($races as $raceData) {
+            // Calculate race time if start_time and delay are provided
+            $raceTime = null;
+            if (isset($raceData['start_time']) && isset($raceData['delay'])) {
+                $raceTime = $this->calculateRaceTime($raceData['start_time'], $raceData['delay']);
+            }
+
+            // Update or create race result
+            $raceResult = RaceResult::updateOrCreate(
+                [
+                    'discipline_id' => $disciplineId,
+                    'stage' => $raceData['stage']
+                ],
+                [
+                    'race_number' => $raceData['race_number'],
+                    'race_time' => $raceTime,
+                    'status' => $raceData['status'] ?? 'SCHEDULED'
+                ]
+            );
+
+            // Update crew assignments if lanes are provided
+            if (isset($raceData['lanes']) && is_array($raceData['lanes'])) {
+                $this->updateCrewAssignments($raceResult, $raceData['lanes']);
+            }
+
+            // Load relationships
+            try {
+                $raceResult->load('discipline', 'crewResults.crew.team');
+            } catch (\Exception $e) {
+                \Log::error("Error loading relationships: " . $e->getMessage());
+                $raceResult->load('discipline', 'crewResults.crew');
+            }
+
+            $importedRaces[] = $raceResult;
+        }
+
+        return $importedRaces;
     }
 
     /**

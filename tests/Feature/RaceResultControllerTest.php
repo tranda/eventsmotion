@@ -313,4 +313,253 @@ class RaceResultControllerTest extends TestCase
         $this->assertNull($crewResult->time_ms, 'Time should be cleared when not provided in bulk update');
         $this->assertEquals(1, $crewResult->lane, 'Lane should remain the same');
     }
+
+    /**
+     * Test the new bulk import with cleanup functionality.
+     */
+    public function test_bulk_import_with_cleanup_removes_orphaned_races()
+    {
+        // Create test data
+        $event = Event::factory()->create();
+        $discipline = Discipline::factory()->create(['event_id' => $event->id]);
+
+        // Create existing races that should be cleaned up
+        $orphanedRace1 = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'Heat 1',
+            'race_number' => 1,
+            'status' => 'SCHEDULED'
+        ]);
+
+        $orphanedRace2 = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'Heat 2',
+            'race_number' => 2,
+            'status' => 'FINISHED'
+        ]);
+
+        // Create crew results for orphaned races
+        $team1 = Team::factory()->create(['name' => 'Team 1']);
+        $team2 = Team::factory()->create(['name' => 'Team 2']);
+        $crew1 = Crew::factory()->create(['team_id' => $team1->id, 'discipline_id' => $discipline->id]);
+        $crew2 = Crew::factory()->create(['team_id' => $team2->id, 'discipline_id' => $discipline->id]);
+
+        CrewResult::factory()->create([
+            'crew_id' => $crew1->id,
+            'race_result_id' => $orphanedRace1->id,
+            'position' => 1,
+            'time_ms' => 150000,
+            'status' => 'FINISHED'
+        ]);
+
+        CrewResult::factory()->create([
+            'crew_id' => $crew2->id,
+            'race_result_id' => $orphanedRace2->id,
+            'position' => 1,
+            'time_ms' => 160000,
+            'status' => 'FINISHED'
+        ]);
+
+        // Verify orphaned data exists before cleanup
+        $this->assertDatabaseHas('race_results', ['id' => $orphanedRace1->id]);
+        $this->assertDatabaseHas('race_results', ['id' => $orphanedRace2->id]);
+        $this->assertDatabaseHas('crew_results', ['race_result_id' => $orphanedRace1->id]);
+        $this->assertDatabaseHas('crew_results', ['race_result_id' => $orphanedRace2->id]);
+
+        // Import new races (only Heat 3 and Final - Heat 1 and 2 should be cleaned up)
+        $importData = [
+            'discipline_id' => $discipline->id,
+            'perform_cleanup' => true,
+            'races' => [
+                [
+                    'race_number' => 3,
+                    'stage' => 'Heat 3',
+                    'start_time' => '10:00',
+                    'delay' => '0:00',
+                    'status' => 'SCHEDULED',
+                    'lanes' => [
+                        1 => [
+                            'team' => 'Team 1',
+                            'time' => null
+                        ]
+                    ]
+                ],
+                [
+                    'race_number' => 4,
+                    'stage' => 'Final',
+                    'start_time' => '11:00',
+                    'delay' => '0:00',
+                    'status' => 'SCHEDULED',
+                    'lanes' => [
+                        1 => [
+                            'team' => 'Team 2',
+                            'time' => null
+                        ]
+                    ]
+                ]
+            ]
+        ];
+
+        $response = $this->postJson('/api/race-results/bulk-import-with-cleanup', $importData);
+
+        $response->assertStatus(200)
+            ->assertJson([
+                'success' => true
+            ]);
+
+        $responseData = $response->json();
+        $this->assertArrayHasKey('cleanup_summary', $responseData['data']);
+        $this->assertEquals(2, $responseData['data']['cleanup_summary']['deleted_count']);
+
+        // Verify orphaned races and their crew results were deleted
+        $this->assertDatabaseMissing('race_results', ['id' => $orphanedRace1->id]);
+        $this->assertDatabaseMissing('race_results', ['id' => $orphanedRace2->id]);
+        $this->assertDatabaseMissing('crew_results', ['race_result_id' => $orphanedRace1->id]);
+        $this->assertDatabaseMissing('crew_results', ['race_result_id' => $orphanedRace2->id]);
+
+        // Verify new races were created
+        $this->assertDatabaseHas('race_results', [
+            'discipline_id' => $discipline->id,
+            'stage' => 'Heat 3',
+            'race_number' => 3
+        ]);
+        $this->assertDatabaseHas('race_results', [
+            'discipline_id' => $discipline->id,
+            'stage' => 'Final',
+            'race_number' => 4
+        ]);
+    }
+
+    /**
+     * Test that cleanup only affects the specified discipline.
+     */
+    public function test_cleanup_only_affects_specified_discipline()
+    {
+        // Create test data for two different disciplines
+        $event = Event::factory()->create();
+        $discipline1 = Discipline::factory()->create(['event_id' => $event->id]);
+        $discipline2 = Discipline::factory()->create(['event_id' => $event->id]);
+
+        // Create races for both disciplines
+        $race1_discipline1 = RaceResult::factory()->create([
+            'discipline_id' => $discipline1->id,
+            'stage' => 'Heat 1',
+            'race_number' => 1
+        ]);
+
+        $race1_discipline2 = RaceResult::factory()->create([
+            'discipline_id' => $discipline2->id,
+            'stage' => 'Heat 1',
+            'race_number' => 1
+        ]);
+
+        // Import data for discipline1 only (should not affect discipline2)
+        $importData = [
+            'discipline_id' => $discipline1->id,
+            'perform_cleanup' => true,
+            'races' => [
+                [
+                    'race_number' => 2,
+                    'stage' => 'Final',
+                    'status' => 'SCHEDULED'
+                ]
+            ]
+        ];
+
+        $response = $this->postJson('/api/race-results/bulk-import-with-cleanup', $importData);
+
+        $response->assertStatus(200);
+
+        // Verify discipline1's old race was cleaned up
+        $this->assertDatabaseMissing('race_results', ['id' => $race1_discipline1->id]);
+
+        // Verify discipline2's race was NOT affected
+        $this->assertDatabaseHas('race_results', ['id' => $race1_discipline2->id]);
+
+        // Verify new race was created for discipline1
+        $this->assertDatabaseHas('race_results', [
+            'discipline_id' => $discipline1->id,
+            'stage' => 'Final',
+            'race_number' => 2
+        ]);
+    }
+
+    /**
+     * Test that cleanup can be disabled.
+     */
+    public function test_cleanup_can_be_disabled()
+    {
+        // Create test data
+        $event = Event::factory()->create();
+        $discipline = Discipline::factory()->create(['event_id' => $event->id]);
+
+        $existingRace = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'Heat 1',
+            'race_number' => 1
+        ]);
+
+        // Import with cleanup disabled
+        $importData = [
+            'discipline_id' => $discipline->id,
+            'perform_cleanup' => false,
+            'races' => [
+                [
+                    'race_number' => 2,
+                    'stage' => 'Final',
+                    'status' => 'SCHEDULED'
+                ]
+            ]
+        ];
+
+        $response = $this->postJson('/api/race-results/bulk-import-with-cleanup', $importData);
+
+        $response->assertStatus(200);
+
+        // Verify existing race was NOT deleted
+        $this->assertDatabaseHas('race_results', ['id' => $existingRace->id]);
+
+        // Verify new race was created
+        $this->assertDatabaseHas('race_results', [
+            'discipline_id' => $discipline->id,
+            'stage' => 'Final',
+            'race_number' => 2
+        ]);
+    }
+
+    /**
+     * Test transaction rollback on import failure.
+     */
+    public function test_transaction_rollback_on_import_failure()
+    {
+        // Create test data
+        $event = Event::factory()->create();
+        $discipline = Discipline::factory()->create(['event_id' => $event->id]);
+
+        $existingRace = RaceResult::factory()->create([
+            'discipline_id' => $discipline->id,
+            'stage' => 'Heat 1',
+            'race_number' => 1
+        ]);
+
+        // Import with invalid data that should cause failure
+        $importData = [
+            'discipline_id' => $discipline->id,
+            'perform_cleanup' => true,
+            'races' => [
+                [
+                    'race_number' => 'invalid', // This should cause validation error
+                    'stage' => 'Final',
+                    'status' => 'SCHEDULED'
+                ]
+            ]
+        ];
+
+        $response = $this->postJson('/api/race-results/bulk-import-with-cleanup', $importData);
+
+        $response->assertStatus(422); // Validation error
+
+        // Verify existing race was NOT deleted (transaction rolled back)
+        $this->assertDatabaseHas('race_results', ['id' => $existingRace->id]);
+    }
 }

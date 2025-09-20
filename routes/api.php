@@ -122,6 +122,8 @@ Route::middleware('auth:sanctum')->post('race-results/{raceResultId}/crew-result
 Route::middleware('auth:sanctum')->post('race-results/{raceResultId}/recalculate-positions', [RaceResultController::class, 'recalculatePositions']);
 // Secure race data import endpoint - requires API key with specific permission
 Route::middleware('apikey:races.bulk-update')->post('race-results/bulk-update', [RaceResultController::class, 'bulkUpdate']);
+// Enhanced import endpoint with cleanup logic for discipline-specific imports
+Route::middleware('auth:sanctum')->post('race-results/bulk-import-with-cleanup', [RaceResultController::class, 'bulkImportWithCleanup']);
 
 Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
     return $request->user();
