@@ -282,21 +282,21 @@ class PublicController extends BaseController
                         $raceResult->crewResults->each(function($crewResult) use ($finalTimes) {
                             $finalData = $finalTimes->get($crewResult->crew_id);
                             if ($finalData) {
-                                $crewResult->final_time_ms = $finalData['final_time_ms'];
-                                $crewResult->final_status = $finalData['final_status'];
+                                $crewResult->setAttribute('final_time_ms', $finalData['final_time_ms']);
+                                $crewResult->setAttribute('final_status', $finalData['final_status']);
                             } else {
-                                $crewResult->final_time_ms = null;
-                                $crewResult->final_status = null;
+                                $crewResult->setAttribute('final_time_ms', null);
+                                $crewResult->setAttribute('final_status', null);
                             }
-                            $crewResult->is_final_round = true;
+                            $crewResult->setAttribute('is_final_round', true);
                         });
                     } else {
                         // For non-final rounds, just add the flag
                         if ($raceResult->relationLoaded('crewResults')) {
                             $raceResult->crewResults->each(function($crewResult) {
-                                $crewResult->final_time_ms = null;
-                                $crewResult->final_status = null;
-                                $crewResult->is_final_round = false;
+                                $crewResult->setAttribute('final_time_ms', null);
+                                $crewResult->setAttribute('final_status', null);
+                                $crewResult->setAttribute('is_final_round', false);
                             });
                         }
                     }

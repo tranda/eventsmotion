@@ -160,4 +160,31 @@ class CrewResult extends Model
 
         return sprintf('%02d:%02d.%03d', $minutes, $seconds, $milliseconds);
     }
+
+    /**
+     * Accessor for final_time_ms attribute.
+     * This will be set dynamically for final rounds.
+     */
+    public function getFinalTimeMsAttribute()
+    {
+        return $this->attributes['final_time_ms'] ?? null;
+    }
+
+    /**
+     * Accessor for final_status attribute.
+     * This will be set dynamically for final rounds.
+     */
+    public function getFinalStatusAttribute()
+    {
+        return $this->attributes['final_status'] ?? null;
+    }
+
+    /**
+     * Accessor for is_final_round attribute.
+     * This will be set dynamically.
+     */
+    public function getIsFinalRoundAttribute()
+    {
+        return $this->attributes['is_final_round'] ?? false;
+    }
 }
