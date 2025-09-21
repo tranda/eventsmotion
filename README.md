@@ -1,66 +1,224 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Events Platform - Backend API
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+A Laravel-based RESTful API backend for managing sports competitions, providing comprehensive event management capabilities.
 
-## About Laravel
+## Features
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+- **RESTful API**: Complete API for frontend and third-party integrations
+- **Authentication & Authorization**: Sanctum-based authentication with role-based access control
+- **Event Management**: Create and manage multiple sporting events
+- **Discipline Management**: Support for various race disciplines and categories
+- **Athlete Management**: Register and manage athlete profiles with club associations
+- **Crew Management**: Handle crew formations for team events
+- **Race Results**: Real-time race result recording and management
+- **QR Code Generation**: Generate unique QR codes for athlete identification
+- **Password Reset**: Email-based password recovery system
+- **File Upload**: Support for athlete photos and document uploads
+- **Data Import**: Bulk import crews from CSV/Excel files
+- **API Key Authentication**: Support for third-party integrations
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## Tech Stack
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+- **Framework**: Laravel 9.x
+- **Language**: PHP 8.0.2+
+- **Database**: MySQL/MariaDB
+- **Authentication**: Laravel Sanctum 3.0
+- **Mail**: SMTP-based email delivery
+- **Testing**: PHPUnit
+- **API Documentation**: RESTful JSON API
 
-## Learning Laravel
+## Project Structure
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+```
+app/
+├── Console/Commands/     # Custom artisan commands
+├── Http/
+│   ├── Controllers/
+│   │   ├── API/         # API controllers for all endpoints
+│   │   └── Controller.php
+│   ├── Middleware/      # Custom middleware (Admin, ApiKey auth)
+│   └── Requests/        # Form request validation
+├── Mail/               # Email templates
+├── Models/             # Eloquent models
+│   ├── Athlete.php
+│   ├── Club.php
+│   ├── Crew.php
+│   ├── CrewAthlete.php
+│   ├── CrewResult.php
+│   ├── Discipline.php
+│   ├── Event.php
+│   ├── RaceResult.php
+│   ├── Team.php
+│   └── User.php
+└── Providers/          # Service providers
 
-You may also try the [Laravel Bootcamp](https://bootcamp.laravel.com), where you will be guided through building a modern Laravel application from scratch.
+database/
+├── migrations/         # Database migrations
+└── seeders/           # Database seeders
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains over 2000 video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+routes/
+├── api.php            # API routes
+└── web.php           # Web routes
+```
 
-## Laravel Sponsors
+## API Endpoints
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the Laravel [Patreon page](https://patreon.com/taylorotwell).
+### Authentication
+- `POST /api/login` - User login
+- `POST /api/logout` - User logout
+- `POST /api/register` - User registration
+- `POST /api/password-reset` - Request password reset
+- `POST /api/password-reset/confirm` - Confirm password reset
 
-### Premium Partners
+### Events & Disciplines
+- `GET/POST/PUT/DELETE /api/events` - Event CRUD operations
+- `GET/POST/PUT/DELETE /api/disciplines` - Discipline CRUD operations
 
-- **[Vehikl](https://vehikl.com/)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Cubet Techno Labs](https://cubettech.com)**
-- **[Cyber-Duck](https://cyber-duck.co.uk)**
-- **[Many](https://www.many.co.uk)**
-- **[Webdock, Fast VPS Hosting](https://www.webdock.io/en)**
-- **[DevSquad](https://devsquad.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel/)**
-- **[OP.GG](https://op.gg)**
-- **[WebReinvent](https://webreinvent.com/?utm_source=laravel&utm_medium=github&utm_campaign=patreon-sponsors)**
-- **[Lendio](https://lendio.com)**
+### Athletes & Clubs
+- `GET/POST/PUT/DELETE /api/athletes` - Athlete CRUD operations
+- `GET/POST/PUT/DELETE /api/clubs` - Club CRUD operations
+- `POST /api/athletes/import` - Bulk import athletes
+
+### Crews & Results
+- `GET/POST/PUT/DELETE /api/crews` - Crew CRUD operations
+- `GET/POST/PUT/DELETE /api/race-results` - Race result operations
+- `GET /api/crews/{id}/results` - Get crew results
+
+### Teams
+- `GET/POST/PUT/DELETE /api/teams` - Team CRUD operations
+- `POST /api/teams/{id}/clubs` - Manage team clubs
+
+### Files & QR Codes
+- `POST /api/file/upload` - Upload files
+- `GET /api/qr-code/{athlete_id}` - Generate athlete QR code
+
+## Getting Started
+
+### Prerequisites
+
+- PHP 8.0.2 or higher
+- Composer
+- MySQL/MariaDB
+- Mail server (for password reset functionality)
+
+### Installation
+
+1. Clone the repository:
+```bash
+git clone [repository-url]
+cd eventsmotion
+```
+
+2. Install dependencies:
+```bash
+composer install
+```
+
+3. Copy environment file:
+```bash
+cp .env.example .env
+```
+
+4. Generate application key:
+```bash
+php artisan key:generate
+```
+
+5. Configure database in `.env`:
+```
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=your_database
+DB_USERNAME=your_username
+DB_PASSWORD=your_password
+```
+
+6. Configure mail settings in `.env`:
+```
+MAIL_MAILER=smtp
+MAIL_HOST=your_mail_host
+MAIL_PORT=587
+MAIL_USERNAME=your_mail_username
+MAIL_PASSWORD=your_mail_password
+MAIL_ENCRYPTION=tls
+MAIL_FROM_ADDRESS=noreply@yourdomain.com
+```
+
+7. Run migrations:
+```bash
+php artisan migrate
+```
+
+8. Seed the database (optional):
+```bash
+php artisan db:seed
+```
+
+9. Start the development server:
+```bash
+php artisan serve
+```
+
+## Custom Artisan Commands
+
+- `php artisan crews:import {file}` - Import crews from CSV/Excel
+- `php artisan cleanup:stale-results` - Clean up stale crew results
+- `php artisan test:database` - Test database connection
+- `php artisan test:email` - Test email configuration
+
+## Testing
+
+Run the test suite:
+```bash
+php artisan test
+```
+
+## Deployment
+
+For production deployment:
+
+1. Set environment to production in `.env`:
+```
+APP_ENV=production
+APP_DEBUG=false
+```
+
+2. Optimize the application:
+```bash
+composer install --optimize-autoloader --no-dev
+php artisan config:cache
+php artisan route:cache
+php artisan view:cache
+```
+
+3. Ensure proper file permissions:
+```bash
+chmod -R 755 storage
+chmod -R 755 bootstrap/cache
+```
+
+## Security
+
+- All API endpoints are protected with Sanctum authentication
+- Admin-only endpoints require admin middleware
+- API key authentication available for third-party integrations
+- CSRF protection enabled for web routes
+- SQL injection protection through Eloquent ORM
+- XSS protection through blade templating
 
 ## Contributing
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
-## Code of Conduct
+## Author
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
-
-## Security Vulnerabilities
-
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+**Zoran Trandafilovic**
 
 ## License
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+This project is proprietary software. All rights reserved.
