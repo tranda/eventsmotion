@@ -63,7 +63,7 @@ class UserController extends BaseController
 			$user->name = $request->name;
 		}
 		if ($request->has('username')) {
-			$user->name = $request->username;
+			$user->username = $request->username;
 		}
 		if ($request->has('email')) {
 			$user->email = $request->email;
