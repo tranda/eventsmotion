@@ -1148,4 +1148,230 @@ class RaceResultController extends BaseController
             return $result;
         })->values()->toArray();
     }
+
+    /**
+     * Fetch race plans from external app endpoint.
+     * Protected with the same API key as bulk-update.
+     * Returns all race results/plans for a given event with comprehensive race information.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function fetchRacePlans(Request $request)
+    {
+        \Log::info('🚀 fetchRacePlans method called', [
+            'event_id' => $request->query('event_id'),
+            'timestamp' => now()->toDateTimeString()
+        ]);
+
+        try {
+            $eventId = $request->query('event_id');
+
+            if (!$eventId) {
+                return $this->sendError('Event ID is required', [], 422);
+            }
+
+            // Verify event exists
+            $event = \App\Models\Event::find($eventId);
+            if (!$event) {
+                return $this->sendError('Event not found', [], 404);
+            }
+
+            // Get all race results for the event with full relationships
+            $raceResults = RaceResult::with([
+                'discipline' => function($query) {
+                    $query->select('id', 'event_id', 'boat_group', 'age_group', 'gender_group', 'distance');
+                },
+                'crewResults.crew.team' => function($query) {
+                    $query->select('id', 'name', 'club_id');
+                }
+            ])
+            ->forEvent($eventId)
+            ->orderBy('race_number', 'asc')
+            ->get();
+
+            // Transform the data for external consumption
+            $racePlans = $raceResults->map(function ($raceResult) {
+                $discipline = $raceResult->discipline;
+
+                // Build discipline info string
+                $disciplineInfo = "{$discipline->boat_group}, {$discipline->age_group}, {$discipline->gender_group} {$discipline->distance}";
+
+                // Get crew/lane assignments
+                $lanes = $raceResult->crewResults->map(function ($crewResult) {
+                    return [
+                        'lane' => $crewResult->lane,
+                        'team' => $crewResult->crew->team->name ?? 'Unknown Team',
+                        'crew_id' => $crewResult->crew->id,
+                        'time' => $crewResult->time_ms ? CrewResult::formatTimeFromMs($crewResult->time_ms) : null,
+                        'status' => $crewResult->status,
+                        'position' => $crewResult->position
+                    ];
+                })->values()->toArray();
+
+                return [
+                    'id' => $raceResult->id,
+                    'race_number' => $raceResult->race_number,
+                    'stage' => $raceResult->stage,
+                    'discipline_id' => $raceResult->discipline_id,
+                    'discipline_info' => $disciplineInfo,
+                    'boat_size' => $discipline->boat_group,
+                    'race_time' => $raceResult->race_time ? $raceResult->race_time->toDateTimeString() : null,
+                    'status' => $raceResult->status,
+                    'lanes' => $lanes,
+                    'title' => $raceResult->title,
+                    'created_at' => $raceResult->created_at,
+                    'updated_at' => $raceResult->updated_at
+                ];
+            });
+
+            \Log::info('🏁 fetchRacePlans completed successfully', [
+                'event_id' => $eventId,
+                'races_returned' => $racePlans->count(),
+                'timestamp' => now()->toDateTimeString()
+            ]);
+
+            return $this->sendResponse([
+                'event_id' => $eventId,
+                'event_name' => $event->name,
+                'race_count' => $racePlans->count(),
+                'races' => $racePlans
+            ], 'Race plans retrieved successfully');
+
+        } catch (\Exception $e) {
+            \Log::error('❌ Error in fetchRacePlans', [
+                'error' => $e->getMessage(),
+                'event_id' => $request->query('event_id'),
+                'timestamp' => now()->toDateTimeString()
+            ]);
+
+            return $this->sendError('Error retrieving race plans', [$e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Public test endpoint for debugging fetch-plans functionality.
+     * Returns test data and helps debug API connectivity issues.
+     * NO AUTHENTICATION REQUIRED - for debugging only.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function testFetchPlans(Request $request)
+    {
+        \Log::info('🧪 testFetchPlans method called for debugging', [
+            'event_id' => $request->query('event_id'),
+            'timestamp' => now()->toDateTimeString(),
+            'user_agent' => $request->header('User-Agent'),
+            'ip' => $request->ip()
+        ]);
+
+        try {
+            $eventId = $request->query('event_id');
+
+            // Test 1: Basic connectivity
+            $tests = [
+                'basic_connectivity' => 'OK',
+                'timestamp' => now()->toDateTimeString(),
+                'request_method' => $request->method(),
+                'event_id_provided' => $eventId ? 'YES' : 'NO',
+                'event_id_value' => $eventId
+            ];
+
+            // Test 2: Database connectivity
+            try {
+                $eventCount = \App\Models\Event::count();
+                $tests['database_connection'] = 'OK';
+                $tests['total_events_in_db'] = $eventCount;
+            } catch (\Exception $e) {
+                $tests['database_connection'] = 'ERROR';
+                $tests['database_error'] = $e->getMessage();
+            }
+
+            // Test 3: Event existence check
+            if ($eventId) {
+                try {
+                    $event = \App\Models\Event::find($eventId);
+                    if ($event) {
+                        $tests['event_exists'] = 'YES';
+                        $tests['event_name'] = $event->name;
+
+                        // Test 4: Race results count
+                        $raceCount = RaceResult::forEvent($eventId)->count();
+                        $tests['race_results_count'] = $raceCount;
+
+                        // Test 5: Sample race data
+                        if ($raceCount > 0) {
+                            $sampleRace = RaceResult::with(['discipline', 'crewResults.crew.team'])
+                                ->forEvent($eventId)
+                                ->first();
+
+                            if ($sampleRace) {
+                                $tests['sample_race'] = [
+                                    'id' => $sampleRace->id,
+                                    'race_number' => $sampleRace->race_number,
+                                    'stage' => $sampleRace->stage,
+                                    'status' => $sampleRace->status,
+                                    'discipline_loaded' => $sampleRace->discipline ? 'YES' : 'NO',
+                                    'crew_results_count' => $sampleRace->crewResults->count()
+                                ];
+                            }
+                        }
+                    } else {
+                        $tests['event_exists'] = 'NO';
+                        $tests['available_events'] = \App\Models\Event::select('id', 'name')->limit(5)->get();
+                    }
+                } catch (\Exception $e) {
+                    $tests['event_check_error'] = $e->getMessage();
+                }
+            }
+
+            // Test 6: Try the actual fetchRacePlans method
+            if ($eventId) {
+                try {
+                    $actualResult = $this->fetchRacePlans($request);
+                    $tests['fetch_race_plans_test'] = 'SUCCESS';
+                    $tests['actual_response_status'] = $actualResult->getStatusCode();
+                } catch (\Exception $e) {
+                    $tests['fetch_race_plans_test'] = 'ERROR';
+                    $tests['fetch_error'] = $e->getMessage();
+                    $tests['fetch_error_line'] = $e->getLine();
+                    $tests['fetch_error_file'] = basename($e->getFile());
+                }
+            }
+
+            return response()->json([
+                'success' => true,
+                'debug_mode' => true,
+                'message' => 'Debug test completed',
+                'tests' => $tests,
+                'usage' => [
+                    'description' => 'This is a public debug endpoint',
+                    'usage' => 'Add ?event_id=X to test with a specific event',
+                    'protected_endpoint' => '/api/race-results/fetch-plans (requires API key)',
+                    'debug_endpoint' => '/api/race-results/test-fetch-plans (public, no auth)'
+                ]
+            ], 200);
+
+        } catch (\Exception $e) {
+            \Log::error('❌ Error in testFetchPlans', [
+                'error' => $e->getMessage(),
+                'line' => $e->getLine(),
+                'file' => $e->getFile(),
+                'event_id' => $request->query('event_id')
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'debug_mode' => true,
+                'message' => 'Debug test failed',
+                'error' => [
+                    'message' => $e->getMessage(),
+                    'line' => $e->getLine(),
+                    'file' => basename($e->getFile())
+                ],
+                'timestamp' => now()->toDateTimeString()
+            ], 500);
+        }
+    }
 }
