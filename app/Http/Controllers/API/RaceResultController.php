@@ -1486,15 +1486,28 @@ class RaceResultController extends BaseController
         ]);
 
         try {
-            $request->validate([
-                'race_id' => 'required|exists:race_results,id',
-                'status' => 'nullable|in:SCHEDULED,IN_PROGRESS,FINISHED,CANCELLED',
-                'lanes' => 'nullable|array',
-                'lanes.*.team' => 'nullable|string',
-                'lanes.*.time' => 'nullable|string',
-                'images' => 'nullable|array',
-                'images.*' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:10240'
-            ]);
+            // Handle both JSON and multipart requests
+            $isMultipart = $request->hasFile('images');
+
+            if ($isMultipart) {
+                $request->validate([
+                    'race_id' => 'required|exists:race_results,id',
+                    'status' => 'nullable|in:SCHEDULED,IN_PROGRESS,FINISHED,CANCELLED',
+                    'lanes' => 'nullable|array',
+                    'lanes.*.team' => 'nullable|string',
+                    'lanes.*.time' => 'nullable|string',
+                    'images' => 'nullable|array',
+                    'images.*' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:10240'
+                ]);
+            } else {
+                $request->validate([
+                    'race_id' => 'required|exists:race_results,id',
+                    'status' => 'nullable|in:SCHEDULED,IN_PROGRESS,FINISHED,CANCELLED',
+                    'lanes' => 'nullable|array',
+                    'lanes.*.team' => 'nullable|string',
+                    'lanes.*.time' => 'nullable|string'
+                ]);
+            }
 
             $raceId = $request->input('race_id');
             $raceStatus = $request->input('status');
