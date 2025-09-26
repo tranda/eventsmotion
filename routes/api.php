@@ -112,6 +112,14 @@ Route::middleware('auth:sanctum')->put('crewathletes/{crewathleteId}', [CrewAthl
 Route::middleware('auth:sanctum')->delete('crewathletes/{crewathleteId}', [CrewAthleteController::class, 'deleteCrewAthlete']);
 
 // Race Results Routes
+// Secure race data import endpoint - requires API key with specific permission
+Route::middleware('apikey:races.bulk-update')->post('race-results/bulk-update', [RaceResultController::class, 'bulkUpdate']);
+// Secure race plans fetch endpoint - requires API key with specific permission (same as bulk-update)
+Route::middleware('apikey:races.bulk-update')->get('race-results/fetch-plans', [RaceResultController::class, 'fetchRacePlans']);
+// Secure single race update endpoint by race ID - requires API key with specific permission (same as bulk-update)
+Route::middleware('apikey:races.bulk-update')->post('race-results/update-single', [RaceResultController::class, 'updateSingleRaceById']);
+// Enhanced import endpoint with cleanup logic for discipline-specific imports
+Route::middleware('auth:sanctum')->post('race-results/bulk-import-with-cleanup', [RaceResultController::class, 'bulkImportWithCleanup']);
 Route::middleware('auth:sanctum')->get('race-results', [RaceResultController::class, 'index']);
 Route::middleware('auth:sanctum')->get('race-results/{id}', [RaceResultController::class, 'show']);
 Route::middleware('auth:sanctum')->post('race-results', [RaceResultController::class, 'store']);
@@ -120,14 +128,6 @@ Route::middleware('auth:sanctum')->delete('race-results/{id}', [RaceResultContro
 Route::middleware('auth:sanctum')->get('race-results/{raceResultId}/crew-results', [RaceResultController::class, 'getCrewResults']);
 Route::middleware('auth:sanctum')->post('race-results/{raceResultId}/crew-results', [RaceResultController::class, 'storeCrewResults']);
 Route::middleware('auth:sanctum')->post('race-results/{raceResultId}/recalculate-positions', [RaceResultController::class, 'recalculatePositions']);
-// Secure race data import endpoint - requires API key with specific permission
-Route::middleware('apikey:races.bulk-update')->post('race-results/bulk-update', [RaceResultController::class, 'bulkUpdate']);
-// Secure race plans fetch endpoint - requires API key with specific permission (same as bulk-update)
-Route::middleware('apikey:races.bulk-update')->get('race-results/fetch-plans', [RaceResultController::class, 'fetchRacePlans']);
-// Public debug endpoint for testing fetch-plans functionality (NO AUTHENTICATION)
-Route::get('race-results/test-fetch-plans', [RaceResultController::class, 'testFetchPlans']);
-// Enhanced import endpoint with cleanup logic for discipline-specific imports
-Route::middleware('auth:sanctum')->post('race-results/bulk-import-with-cleanup', [RaceResultController::class, 'bulkImportWithCleanup']);
 
 Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
     return $request->user();
@@ -139,6 +139,9 @@ Route::middleware('auth:sanctum')->post('qrcodeAll', [QrCodeController::class, '
 // File proxy endpoints for serving images with CORS support
 Route::get('photos/{filename}', [FileController::class, 'getPhoto']);
 Route::get('certificates/{filename}', [FileController::class, 'getCertificate']);
+
+// Public debug endpoint for testing fetch-plans functionality (NO AUTHENTICATION)
+Route::get('race-results/test-fetch-plans', [RaceResultController::class, 'testFetchPlans']);
 
 // Public Routes - No authentication required
 Route::prefix('public')->group(function () {

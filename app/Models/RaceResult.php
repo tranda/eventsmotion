@@ -15,10 +15,12 @@ class RaceResult extends Model
         'race_time',
         'stage',
         'status',
+        'images',
     ];
 
     protected $casts = [
         'race_time' => 'datetime',
+        'images' => 'array',
     ];
 
     /**

@@ -494,7 +494,7 @@ class RaceResultController extends BaseController
                     $updatedRaces[] = $raceResult;
                 }
 
-                // Perform discipline-specific cleanup if requested
+                // Perform event-wide cleanup if requested
                 \Log::info('Cleanup check', [
                     'perform_cleanup' => $performCleanup,
                     'disciplines_processed_count' => count($disciplinesProcessed),
@@ -502,6 +502,7 @@ class RaceResultController extends BaseController
                 ]);
 
                 if ($performCleanup) {
+                    // Step 1: Discipline-specific cleanup (existing logic)
                     foreach ($disciplinesProcessed as $discipline) {
                         // Get stages for this discipline from import data
                         $disciplineStages = collect($request->races)
@@ -531,6 +532,16 @@ class RaceResultController extends BaseController
                                 'cleanup' => $disciplineCleanup
                             ];
                         }
+                    }
+
+                    // Step 2: Event-wide cleanup - Delete races not represented in payload
+                    $eventCleanup = $this->performEventWideCleanup($request->event_id, $updatedRaces);
+                    if ($eventCleanup['deleted_count'] > 0) {
+                        $cleanupResults[] = [
+                            'scope' => 'event_wide',
+                            'event_id' => $request->event_id,
+                            'cleanup' => $eventCleanup
+                        ];
                     }
                 }
 
@@ -793,9 +804,19 @@ class RaceResultController extends BaseController
 
                     // Add time if provided, otherwise keep it null (cleared)
                     if ($time && $time !== '') {
-                        $updateData['time_ms'] = $this->convertTimeToMilliseconds($time);
-                        $updateData['status'] = 'FINISHED'; // Crew finished if time is provided
-                        $hasTimeUpdates = true;
+                        // Check if time is actually a status (DNS, DNF, DSQ)
+                        $statusValues = ['DNS', 'DNF', 'DSQ', 'dns', 'dnf', 'dsq'];
+                        if (in_array(strtoupper($time), array_map('strtoupper', $statusValues))) {
+                            // Time field contains a status, not an actual time
+                            $updateData['time_ms'] = null;
+                            $updateData['status'] = strtoupper($time);
+                            $hasTimeUpdates = true;
+                        } else {
+                            // Time field contains actual time
+                            $updateData['time_ms'] = $this->convertTimeToMilliseconds($time);
+                            $updateData['status'] = 'FINISHED';
+                            $hasTimeUpdates = true;
+                        }
                     }
 
                     // Use updateOrCreate to handle existing records
@@ -954,6 +975,75 @@ class RaceResultController extends BaseController
 
         \Log::info('Race cleanup completed', [
             'discipline_id' => $disciplineId,
+            'deleted_races_count' => count($deletedRaces),
+            'deleted_crew_results_count' => $deletedCrewResultsCount
+        ]);
+
+        return [
+            'deleted_count' => count($deletedRaces),
+            'deleted_races' => $deletedRaces,
+            'deleted_crew_results_count' => $deletedCrewResultsCount
+        ];
+    }
+
+    /**
+     * Perform event-wide cleanup to remove races not represented in the payload.
+     * This deletes any race in the event that wasn't processed/updated.
+     *
+     * @param int $eventId
+     * @param array $processedRaces Array of race results that were processed
+     * @return array
+     */
+    private function performEventWideCleanup($eventId, $processedRaces)
+    {
+        $processedRaceIds = collect($processedRaces)->pluck('id')->filter();
+
+        \Log::info('Starting event-wide cleanup', [
+            'event_id' => $eventId,
+            'processed_race_ids' => $processedRaceIds->toArray(),
+            'processed_count' => $processedRaceIds->count()
+        ]);
+
+        // Find all races in the event that were NOT processed
+        $orphanedRaces = RaceResult::whereHas('discipline', function($query) use ($eventId) {
+                $query->where('event_id', $eventId);
+            })
+            ->whereNotIn('id', $processedRaceIds)
+            ->with(['crewResults', 'discipline'])
+            ->get();
+
+        $deletedRaces = [];
+        $deletedCrewResultsCount = 0;
+
+        foreach ($orphanedRaces as $race) {
+            // Count crew results before deletion for logging
+            $crewResultsCount = $race->crewResults()->count();
+            $deletedCrewResultsCount += $crewResultsCount;
+
+            $deletedRaces[] = [
+                'id' => $race->id,
+                'race_number' => $race->race_number,
+                'stage' => $race->stage,
+                'status' => $race->status,
+                'discipline_info' => $race->discipline ? "{$race->discipline->boat_group}, {$race->discipline->age_group}, {$race->discipline->gender_group} {$race->discipline->distance}" : 'Unknown',
+                'crew_results_count' => $crewResultsCount
+            ];
+
+            \Log::info('Deleting orphaned race from event', [
+                'race_id' => $race->id,
+                'race_number' => $race->race_number,
+                'stage' => $race->stage,
+                'event_id' => $eventId,
+                'discipline_id' => $race->discipline_id,
+                'crew_results_count' => $crewResultsCount
+            ]);
+
+            // Delete the race (crew results will be cascade deleted)
+            $race->delete();
+        }
+
+        \Log::info('Event-wide cleanup completed', [
+            'event_id' => $eventId,
             'deleted_races_count' => count($deletedRaces),
             'deleted_crew_results_count' => $deletedCrewResultsCount
         ]);
@@ -1194,8 +1284,12 @@ class RaceResultController extends BaseController
             $racePlans = $raceResults->map(function ($raceResult) {
                 $discipline = $raceResult->discipline;
 
+                // Format boat group and age group with proper spacing
+                $boatSize = $this->formatDisciplineField($discipline->boat_group);
+                $ageGroup = $this->formatDisciplineField($discipline->age_group);
+
                 // Build discipline info string
-                $disciplineInfo = "{$discipline->boat_group}, {$discipline->age_group}, {$discipline->gender_group} {$discipline->distance}";
+                $disciplineInfo = "{$boatSize}, {$ageGroup}, {$discipline->gender_group} {$discipline->distance}";
 
                 // Get crew/lane assignments
                 $lanes = $raceResult->crewResults->map(function ($crewResult) {
@@ -1215,7 +1309,7 @@ class RaceResultController extends BaseController
                     'stage' => $raceResult->stage,
                     'discipline_id' => $raceResult->discipline_id,
                     'discipline_info' => $disciplineInfo,
-                    'boat_size' => $discipline->boat_group,
+                    'boat_size' => $boatSize,
                     'race_time' => $raceResult->race_time ? $raceResult->race_time->toDateTimeString() : null,
                     'status' => $raceResult->status,
                     'lanes' => $lanes,
@@ -1373,5 +1467,200 @@ class RaceResultController extends BaseController
                 'timestamp' => now()->toDateTimeString()
             ], 500);
         }
+    }
+
+    /**
+     * Update results for a single race by race ID from external app.
+     * Protected with the same API key as bulk-update.
+     * Updates race status, crew results, and handles multiple image uploads.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function updateSingleRaceById(Request $request)
+    {
+        \Log::info('🏁 updateSingleRaceById method called', [
+            'race_id' => $request->input('race_id'),
+            'timestamp' => now()->toDateTimeString(),
+            'has_files' => $request->hasFile('images')
+        ]);
+
+        try {
+            $request->validate([
+                'race_id' => 'required|exists:race_results,id',
+                'status' => 'nullable|in:SCHEDULED,IN_PROGRESS,FINISHED,CANCELLED',
+                'lanes' => 'nullable|array',
+                'lanes.*.team' => 'nullable|string',
+                'lanes.*.time' => 'nullable|string',
+                'images' => 'nullable|array',
+                'images.*' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:10240'
+            ]);
+
+            $raceId = $request->input('race_id');
+            $raceStatus = $request->input('status');
+            $lanes = $request->input('lanes', []);
+
+            // Get the race result
+            $raceResult = RaceResult::with(['discipline'])->find($raceId);
+            if (!$raceResult) {
+                return $this->sendError('Race not found', [], 404);
+            }
+
+            \DB::beginTransaction();
+
+            try {
+                $updateData = [];
+
+                // Update race status if provided
+                if ($raceStatus) {
+                    $updateData['status'] = $raceStatus;
+                }
+
+                // Handle image uploads
+                if ($request->hasFile('images')) {
+                    $uploadedImages = $this->handleImageUploads($request->file('images'), $raceId);
+
+                    // Get existing images and merge with new ones
+                    $existingImages = $raceResult->images ?? [];
+                    $allImages = array_merge($existingImages, $uploadedImages);
+                    $updateData['images'] = $allImages;
+
+                    \Log::info('🖼️ Images processed for race', [
+                        'race_id' => $raceId,
+                        'existing_count' => count($existingImages),
+                        'new_count' => count($uploadedImages),
+                        'total_count' => count($allImages)
+                    ]);
+                }
+
+                // Update race result if there's data to update
+                if (!empty($updateData)) {
+                    $raceResult->update($updateData);
+                }
+
+                // Update crew assignments/results if provided
+                if (!empty($lanes)) {
+                    $this->updateCrewAssignments($raceResult, $lanes);
+                }
+
+                \DB::commit();
+
+                // Reload with relationships for response
+                $raceResult->load(['discipline', 'crewResults.crew.team']);
+
+                // Prepare crew results for response
+                $crewResults = $raceResult->crewResults->map(function($crewResult) {
+                    return [
+                        'id' => $crewResult->id,
+                        'crew_id' => $crewResult->crew_id,
+                        'crew_name' => $crewResult->crew->team->name ?? 'Unknown Team',
+                        'lane' => $crewResult->lane,
+                        'time_ms' => $crewResult->time_ms,
+                        'formatted_time' => $crewResult->time_ms ? CrewResult::formatTimeFromMs($crewResult->time_ms) : null,
+                        'status' => $crewResult->status,
+                        'position' => $crewResult->position,
+                        'updated_at' => $crewResult->updated_at
+                    ];
+                })->sortBy('lane')->values();
+
+                \Log::info('🏁 updateSingleRaceById completed successfully', [
+                    'race_id' => $raceId,
+                    'updated_crews' => $crewResults->count(),
+                    'race_status' => $raceResult->status,
+                    'images_count' => count($raceResult->images ?? [])
+                ]);
+
+                return $this->sendResponse([
+                    'race_id' => $raceId,
+                    'race_number' => $raceResult->race_number,
+                    'race_title' => $raceResult->title,
+                    'stage' => $raceResult->stage,
+                    'status' => $raceResult->status,
+                    'discipline_info' => "{$raceResult->discipline->boat_group}, {$raceResult->discipline->age_group}, {$raceResult->discipline->gender_group} {$raceResult->discipline->distance}",
+                    'crew_results' => $crewResults,
+                    'total_crews' => $crewResults->count(),
+                    'images' => $raceResult->images ?? [],
+                    'images_count' => count($raceResult->images ?? [])
+                ], 'Single race updated successfully');
+
+            } catch (\Exception $e) {
+                \DB::rollBack();
+                throw $e;
+            }
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->sendError('Validation error', $e->errors(), 422);
+        } catch (\Exception $e) {
+            \Log::error('❌ Error in updateSingleRaceById', [
+                'error' => $e->getMessage(),
+                'race_id' => $request->input('race_id'),
+                'timestamp' => now()->toDateTimeString()
+            ]);
+
+            return $this->sendError('Error updating single race', [$e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Handle multiple image uploads for a race.
+     * Saves images to public/racephotos directory with unique names.
+     *
+     * @param array $images Array of uploaded files
+     * @param int $raceId The race ID for filename prefix
+     * @return array Array of saved image filenames
+     */
+    private function handleImageUploads($images, $raceId)
+    {
+        $savedImages = [];
+
+        foreach ($images as $image) {
+            if ($image && $image->isValid()) {
+                // Generate unique filename: race_{raceId}_{timestamp}_{originalname}
+                $timestamp = now()->format('YmdHis');
+                $originalName = pathinfo($image->getClientOriginalName(), PATHINFO_FILENAME);
+                $extension = $image->getClientOriginalExtension();
+                $filename = "race_{$raceId}_{$timestamp}_{$originalName}.{$extension}";
+
+                // Save to public/racephotos directory
+                $path = $image->move(public_path('racephotos'), $filename);
+
+                if ($path) {
+                    $savedImages[] = $filename;
+
+                    \Log::info('🖼️ Image uploaded successfully', [
+                        'race_id' => $raceId,
+                        'filename' => $filename,
+                        'original_name' => $image->getClientOriginalName(),
+                        'size' => $image->getSize()
+                    ]);
+                } else {
+                    \Log::error('❌ Failed to save image', [
+                        'race_id' => $raceId,
+                        'original_name' => $image->getClientOriginalName()
+                    ]);
+                }
+            }
+        }
+
+        return $savedImages;
+    }
+
+    /**
+     * Format discipline fields by adding spaces between words.
+     * Converts "SmallPremier" to "Small Premier", "BigBeat" to "Big Beat", etc.
+     *
+     * @param string $field
+     * @return string
+     */
+    private function formatDisciplineField($field)
+    {
+        if (!$field) {
+            return $field;
+        }
+
+        // Add space before uppercase letters that follow lowercase letters
+        // "SmallPremier" -> "Small Premier"
+        // "BigBoat" -> "Big Boat"
+        return preg_replace('/([a-z])([A-Z])/', '$1 $2', $field);
     }
 }
