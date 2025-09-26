@@ -1481,33 +1481,20 @@ class RaceResultController extends BaseController
     {
         \Log::info('🏁 updateSingleRaceById method called', [
             'race_id' => $request->input('race_id'),
-            'timestamp' => now()->toDateTimeString(),
-            'has_files' => $request->hasFile('images')
+            'timestamp' => now()->toDateTimeString()
+            // 'has_files' => $request->hasFile('images')
         ]);
 
         try {
-            // Handle both JSON and multipart requests
-            $isMultipart = $request->hasFile('images');
-
-            if ($isMultipart) {
-                $request->validate([
-                    'race_id' => 'required|exists:race_results,id',
-                    'status' => 'nullable|in:SCHEDULED,IN_PROGRESS,FINISHED,CANCELLED',
-                    'lanes' => 'nullable|array',
-                    'lanes.*.team' => 'nullable|string',
-                    'lanes.*.time' => 'nullable|string',
-                    'images' => 'nullable|array',
-                    'images.*' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:10240'
-                ]);
-            } else {
-                $request->validate([
-                    'race_id' => 'required|exists:race_results,id',
-                    'status' => 'nullable|in:SCHEDULED,IN_PROGRESS,FINISHED,CANCELLED',
-                    'lanes' => 'nullable|array',
-                    'lanes.*.team' => 'nullable|string',
-                    'lanes.*.time' => 'nullable|string'
-                ]);
-            }
+            $request->validate([
+                'race_id' => 'required|exists:race_results,id',
+                'status' => 'nullable|in:SCHEDULED,IN_PROGRESS,FINISHED,CANCELLED',
+                'lanes' => 'nullable|array',
+                'lanes.*.team' => 'nullable|string',
+                'lanes.*.time' => 'nullable|string'
+                // 'images' => 'nullable|array',
+                // 'images.*' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:10240'
+            ]);
 
             $raceId = $request->input('race_id');
             $raceStatus = $request->input('status');
@@ -1529,22 +1516,19 @@ class RaceResultController extends BaseController
                     $updateData['status'] = $raceStatus;
                 }
 
-                // Handle image uploads
-                if ($request->hasFile('images')) {
-                    $uploadedImages = $this->handleImageUploads($request->file('images'), $raceId);
-
-                    // Get existing images and merge with new ones
-                    $existingImages = $raceResult->images ?? [];
-                    $allImages = array_merge($existingImages, $uploadedImages);
-                    $updateData['images'] = $allImages;
-
-                    \Log::info('🖼️ Images processed for race', [
-                        'race_id' => $raceId,
-                        'existing_count' => count($existingImages),
-                        'new_count' => count($uploadedImages),
-                        'total_count' => count($allImages)
-                    ]);
-                }
+                // Handle image uploads - COMMENTED OUT FOR NOW
+                // if ($request->hasFile('images')) {
+                //     $uploadedImages = $this->handleImageUploads($request->file('images'), $raceId);
+                //     $existingImages = $raceResult->images ?? [];
+                //     $allImages = array_merge($existingImages, $uploadedImages);
+                //     $updateData['images'] = $allImages;
+                //     \Log::info('🖼️ Images processed for race', [
+                //         'race_id' => $raceId,
+                //         'existing_count' => count($existingImages),
+                //         'new_count' => count($uploadedImages),
+                //         'total_count' => count($allImages)
+                //     ]);
+                // }
 
                 // Update race result if there's data to update
                 if (!empty($updateData)) {
@@ -1579,8 +1563,8 @@ class RaceResultController extends BaseController
                 \Log::info('🏁 updateSingleRaceById completed successfully', [
                     'race_id' => $raceId,
                     'updated_crews' => $crewResults->count(),
-                    'race_status' => $raceResult->status,
-                    'images_count' => count($raceResult->images ?? [])
+                    'race_status' => $raceResult->status
+                    // 'images_count' => count($raceResult->images ?? [])
                 ]);
 
                 return $this->sendResponse([
@@ -1591,9 +1575,9 @@ class RaceResultController extends BaseController
                     'status' => $raceResult->status,
                     'discipline_info' => "{$raceResult->discipline->boat_group}, {$raceResult->discipline->age_group}, {$raceResult->discipline->gender_group} {$raceResult->discipline->distance}",
                     'crew_results' => $crewResults,
-                    'total_crews' => $crewResults->count(),
-                    'images' => $raceResult->images ?? [],
-                    'images_count' => count($raceResult->images ?? [])
+                    'total_crews' => $crewResults->count()
+                    // 'images' => $raceResult->images ?? [],
+                    // 'images_count' => count($raceResult->images ?? [])
                 ], 'Single race updated successfully');
 
             } catch (\Exception $e) {
