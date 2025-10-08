@@ -13,7 +13,7 @@ return new class extends Migration
     {
         if (!Schema::hasColumn('race_results', 'images')) {
             Schema::table('race_results', function (Blueprint $table) {
-                $table->json('images')->nullable()->after('status');
+                $table->text('images')->nullable()->after('status');
             });
         }
     }
