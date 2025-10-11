@@ -534,15 +534,17 @@ class RaceResultController extends BaseController
                         }
                     }
 
-                    // Step 2: Event-wide cleanup - Delete races not represented in payload
-                    $eventCleanup = $this->performEventWideCleanup($request->event_id, $updatedRaces);
-                    if ($eventCleanup['deleted_count'] > 0) {
-                        $cleanupResults[] = [
-                            'scope' => 'event_wide',
-                            'event_id' => $request->event_id,
-                            'cleanup' => $eventCleanup
-                        ];
-                    }
+                    // Step 2: Event-wide cleanup - DISABLED to prevent deleting races from other distance/day imports
+                    // Discipline-specific cleanup (above) is sufficient for removing orphaned races
+                    // Event-wide cleanup was too aggressive and deleted valid races from other sheets (e.g., Day 1 vs Day 2)
+                    // $eventCleanup = $this->performEventWideCleanup($request->event_id, $updatedRaces);
+                    // if ($eventCleanup['deleted_count'] > 0) {
+                    //     $cleanupResults[] = [
+                    //         'scope' => 'event_wide',
+                    //         'event_id' => $request->event_id,
+                    //         'cleanup' => $eventCleanup
+                    //     ];
+                    // }
                 }
 
                 // Auto-cancel races that were removed from the sheet (existing functionality)
