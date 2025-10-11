@@ -18,9 +18,19 @@ class ApiKeyAuth
      */
     public function handle(Request $request, Closure $next, ?string $permission = null)
     {
+        \Log::info('🔑 ApiKeyAuth middleware called', [
+            'url' => $request->fullUrl(),
+            'method' => $request->method(),
+            'has_header' => $request->hasHeader('X-API-Key'),
+            'has_param' => $request->has('api_key'),
+            'content_type' => $request->header('Content-Type'),
+            'permission' => $permission
+        ]);
+
         $apiKey = $this->extractApiKey($request);
 
         if (!$apiKey) {
+            \Log::warning('🔑 API key not found in request');
             return response()->json([
                 'success' => false,
                 'message' => 'API key required. Provide via X-API-Key header or api_key parameter.'

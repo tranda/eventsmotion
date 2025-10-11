@@ -729,14 +729,14 @@ class RaceResultController extends BaseController
 
     /**
      * Map boat size to boat group.
-     * 
+     *
      * @param string $boatSize
      * @return string
      */
     private function mapBoatSizeToGroup($boatSize)
     {
-        // Return the boat size as-is since it should be "small" or "standard"
-        return $boatSize;
+        // Capitalize first letter to match database format (Small, Standard)
+        return ucfirst(strtolower($boatSize));
     }
 
     /**
