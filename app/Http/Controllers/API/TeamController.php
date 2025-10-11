@@ -91,14 +91,23 @@ class TeamController extends BaseController
         $user = $request->user(); // Retrieve the authenticated user
         // $competition = Event::where('id', 1)->first();
 
+        // Allow club_id to be passed in request, otherwise use user's club_id
+        // This allows referees, event managers, and admins to create teams for any club
+        $clubId = $request->input('club_id');
+
+        // If club_id not provided or user has access_level 0 (club manager), use user's club_id
+        if (!$clubId || $user->access_level == 0) {
+            $clubId = $user->club_id;
+        }
+
         $team = new Team();
         $team->name = $request->input('name');
-        $team->club_id = $user->club_id;
+        $team->club_id = $clubId;
 
         $team->save();
 
         $teamclub = new TeamClubs();
-        $teamclub->club_id = $user->club_id;
+        $teamclub->club_id = $clubId;
         $teamclub->team_id = $team->id;
         $teamclub->save();
 
