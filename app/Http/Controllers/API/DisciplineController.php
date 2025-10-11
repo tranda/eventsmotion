@@ -20,34 +20,30 @@ class DisciplineController extends BaseController
         if ($request->has('event_id'))
         {
             $eventId = $request->event_id;
-            $disciplines = Discipline::where('event_id', $eventId)
-                ->whereHas('event', function ($query) {
-                    $query->where('status', 'active');
-                })->get();
+            $disciplines = Discipline::where('event_id', $eventId)->get();
+            foreach ($disciplines as $discipline) {
+                $crews = Crew::where('discipline_id', $discipline->id)->get();
+                $discipline->teams_count = $crews->count();
+                $teams = [];
+                foreach ($crews as $crew) {
+                    $team = Team::where('id', $crew->team_id)->first();
+                    if ($team) {
+                        $crew_ext = [
+                            'crew' => $crew,
+                            'team' => $team
+                        ];
+                        $teams[] = $crew_ext;
+                    }
+                }
+                $discipline->teams = $teams;
+
+            }
+            return response()->json($disciplines);
         }
         else {
             $disciplines = Discipline::all();
+            return response()->json($disciplines);
         }
-
-        // Always populate teams_count and teams for all disciplines
-        foreach ($disciplines as $discipline) {
-            $crews = Crew::where('discipline_id', $discipline->id)->get();
-            $discipline->teams_count = $crews->count();
-            $teams = [];
-            foreach ($crews as $crew) {
-                $team = Team::where('id', $crew->team_id)->first();
-                if ($team) {
-                    $crew_ext = [
-                        'crew' => $crew,
-                        'team' => $team
-                    ];
-                    $teams[] = $crew_ext;
-                }
-            }
-            $discipline->teams = $teams;
-        }
-
-        return response()->json($disciplines);
     }
 
     public function getCrewsByDisciplineId(Request $request)
