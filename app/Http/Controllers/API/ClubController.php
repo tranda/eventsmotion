@@ -200,6 +200,10 @@ class ClubController extends BaseController
             $club->country = $request->input('country');
         }
 
+        if ($request->has('active')) {
+            $club->active = $request->input('active');
+        }
+
         $club->save();
 
         return response()->json($club, 200);
