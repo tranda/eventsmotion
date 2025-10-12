@@ -114,4 +114,33 @@ class TeamController extends BaseController
         return response()->json($team);
     }
 
+    public function deleteTeam($id)
+    {
+        $team = Team::find($id);
+        if (!$team) {
+            return response()->json(['error' => 'Team not found'], 404);
+        }
+
+        // Check if team has associated crews
+        $crewsCount = Crew::where('team_id', $id)->count();
+        if ($crewsCount > 0) {
+            return response()->json([
+                'error' => 'Cannot delete team with existing crews',
+                'crews_count' => $crewsCount
+            ], 400);
+        }
+
+        // Check if team has records in team_clubs
+        $teamClubsCount = TeamClubs::where('team_id', $id)->count();
+        if ($teamClubsCount > 0) {
+            return response()->json([
+                'error' => 'Cannot delete team with existing team_clubs records',
+                'team_clubs_count' => $teamClubsCount
+            ], 400);
+        }
+
+        $team->delete();
+        return response()->json(['message' => 'Team deleted successfully'], 200);
+    }
+
 }
