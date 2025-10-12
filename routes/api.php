@@ -60,6 +60,7 @@ Route::get('clubs', [ClubController::class, 'getAllClubs']);
 Route::get('clubsAdel', [ClubController::class, 'getAllClubsForAdel']);
 Route::middleware('auth:sanctum')->get('clubDetails', [ClubController::class, 'getClubDetails']);
 Route::post('clubAndUser', [ClubController::class, 'createClubAndUser']);
+Route::middleware(['auth:sanctum', 'admin'])->post('clubs', [ClubController::class, 'createClub']);
 Route::middleware(['auth:sanctum', 'admin'])->put('clubs/{id}', [ClubController::class, 'updateClub']);
 Route::middleware(['auth:sanctum', 'admin'])->delete('clubs/{id}', [ClubController::class, 'deleteClub']);
 

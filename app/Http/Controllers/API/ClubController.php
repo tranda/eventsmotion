@@ -150,12 +150,10 @@ class ClubController extends BaseController
 
     public function createClub(Request $request)
     {
-        // $user = $request->user(); // Retrieve the authenticated user
-        // $competition = Event::where('id', 1)->first();
-
         $club = new Club();
         $club->name = $request->input('name');
         $club->country = $request->input('country');
+        $club->active = $request->input('active', 1); // Default to active
 
         $club->save();
 
