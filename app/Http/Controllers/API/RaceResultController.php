@@ -37,7 +37,7 @@ class RaceResultController extends BaseController
 
             // Get all races for the event regardless of status
             try {
-                $raceResults = RaceResult::with(['discipline', 'crewResults.crew.team'])
+                $raceResults = RaceResult::with(['discipline', 'crewResults.crew.team.club'])
                     ->forEvent($eventId)
                     ->orderBy('race_number', 'asc')
                     ->get();
