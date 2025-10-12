@@ -8,11 +8,14 @@ use Illuminate\Database\Eloquent\Model;
 class Team extends Model
 {
     use HasFactory;
-	
+
 	protected $fillable = [
         'name',
         'club_id'
     ];
+
+    // Automatically append these relationships when converting to array/JSON
+    protected $with = ['club'];
 
     public function crews()
     {
