@@ -130,15 +130,10 @@ class TeamController extends BaseController
             ], 400);
         }
 
-        // Check if team has records in team_clubs
-        $teamClubsCount = TeamClubs::where('team_id', $id)->count();
-        if ($teamClubsCount > 0) {
-            return response()->json([
-                'error' => 'Cannot delete team with existing team_clubs records',
-                'team_clubs_count' => $teamClubsCount
-            ], 400);
-        }
+        // Delete associated team_clubs records (created automatically when team is created)
+        TeamClubs::where('team_id', $id)->delete();
 
+        // Delete the team
         $team->delete();
         return response()->json(['message' => 'Team deleted successfully'], 200);
     }
