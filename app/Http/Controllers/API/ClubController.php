@@ -183,4 +183,57 @@ class ClubController extends BaseController
         return response()->json($user, 201);
     }
 
+    public function updateClub(Request $request, $id)
+    {
+        $club = Club::find($id);
+
+        if (!$club) {
+            return response()->json(['error' => 'Club not found'], 404);
+        }
+
+        // Update club fields
+        if ($request->has('name')) {
+            $club->name = $request->input('name');
+        }
+
+        if ($request->has('country')) {
+            $club->country = $request->input('country');
+        }
+
+        $club->save();
+
+        return response()->json($club, 200);
+    }
+
+    public function deleteClub($id)
+    {
+        $club = Club::find($id);
+
+        if (!$club) {
+            return response()->json(['error' => 'Club not found'], 404);
+        }
+
+        // Check if club has associated teams
+        $teamsCount = Team::where('club_id', $id)->count();
+        if ($teamsCount > 0) {
+            return response()->json([
+                'error' => 'Cannot delete club with existing teams',
+                'teams_count' => $teamsCount
+            ], 400);
+        }
+
+        // Check if club has associated athletes
+        $athletesCount = Athlete::where('club_id', $id)->count();
+        if ($athletesCount > 0) {
+            return response()->json([
+                'error' => 'Cannot delete club with existing athletes',
+                'athletes_count' => $athletesCount
+            ], 400);
+        }
+
+        $club->delete();
+
+        return response()->json(['message' => 'Club deleted successfully'], 200);
+    }
+
 }
