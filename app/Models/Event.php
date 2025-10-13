@@ -14,6 +14,7 @@ class Event extends Model
         'location',
         'year',
         'status',
+        'available',
         'standard_reserves',
         'standard_min_gende',
         'standard_max_gender',
@@ -28,6 +29,7 @@ class Event extends Model
     protected $dates = ['deleted_at'];
 
     protected $casts = [
+        'available' => 'boolean',
         'race_entries_lock' => 'datetime',
         'name_entries_lock' => 'datetime',
         'crew_entries_lock' => 'datetime',

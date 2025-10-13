@@ -46,10 +46,20 @@ class EventController extends BaseController
 
     /**
      * Get all events (backward compatibility)
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\Response
      */
-    public function getAllEvents()
+    public function getAllEvents(Request $request)
     {
-        $events = Event::all();
+        $query = Event::query();
+
+        // Filter by available flag unless 'all' parameter is true
+        if (!$request->has('all') || $request->all !== 'true') {
+            $query->where('available', 1);
+        }
+
+        $events = $query->get();
         return response()->json($events);
     }
 
@@ -83,6 +93,7 @@ class EventController extends BaseController
                 'location' => $request->location,
                 'year' => $request->year,
                 'status' => $request->status ?? 'active',
+                'available' => $request->available ?? true,
                 'standard_reserves' => $request->standard_reserves,
                 'standard_min_gender' => $request->standard_min_gender,
                 'standard_max_gender' => $request->standard_max_gender,
@@ -117,6 +128,7 @@ class EventController extends BaseController
             if ($request->has('location')) $updateData['location'] = $request->location;
             if ($request->has('year')) $updateData['year'] = $request->year;
             if ($request->has('status')) $updateData['status'] = $request->status;
+            if ($request->has('available')) $updateData['available'] = $request->available;
             if ($request->has('standard_reserves')) $updateData['standard_reserves'] = $request->standard_reserves;
             if ($request->has('standard_min_gender')) $updateData['standard_min_gender'] = $request->standard_min_gender;
             if ($request->has('standard_max_gender')) $updateData['standard_max_gender'] = $request->standard_max_gender;
