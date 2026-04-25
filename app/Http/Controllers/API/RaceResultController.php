@@ -715,13 +715,16 @@ class RaceResultController extends BaseController
         }
         
         // Find or create discipline
+        $competition = $raceData['competition'] ?? null;
+
         return Discipline::firstOrCreate(
             [
                 'event_id' => $eventId,
                 'distance' => $distance,
                 'age_group' => $ageGroup,
                 'gender_group' => $genderGroup,
-                'boat_group' => $boatGroup
+                'boat_group' => $boatGroup,
+                'competition' => $competition
             ],
             [
                 'status' => 'SCHEDULED'

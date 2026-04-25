@@ -15,6 +15,7 @@ class Discipline extends Model
         'age_group',
         'gender_group',
         'boat_group',
+        'competition',
         'status',
     ];
 
