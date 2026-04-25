@@ -17,6 +17,7 @@ use App\Http\Controllers\API\FileController;
 use App\Http\Controllers\API\PublicController;
 use App\Http\Controllers\API\ApiKeyController;
 use App\Http\Controllers\API\PasswordResetController;
+use App\Http\Controllers\API\DatabaseBackupController;
 
 /*
 |--------------------------------------------------------------------------
@@ -81,6 +82,13 @@ Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::post('api-keys', [ApiKeyController::class, 'store']);
     Route::put('api-keys/{id}', [ApiKeyController::class, 'update']);
     Route::delete('api-keys/{id}', [ApiKeyController::class, 'destroy']);
+
+    // Database Backup routes (Admin only)
+    Route::get('backups', [DatabaseBackupController::class, 'index']);
+    Route::post('backups', [DatabaseBackupController::class, 'store']);
+    Route::post('backups/restore', [DatabaseBackupController::class, 'restore']);
+    Route::delete('backups', [DatabaseBackupController::class, 'destroy']);
+    Route::get('backups/download', [DatabaseBackupController::class, 'download']);
 });
 
 // Discipline Routes - Public access for listing, admin access for CRUD
