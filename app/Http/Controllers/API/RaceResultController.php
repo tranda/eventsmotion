@@ -548,10 +548,31 @@ class RaceResultController extends BaseController
                 }
 
                 // Auto-cancel races that were removed from the sheet (existing functionality)
+                // Scope by competitions present in this sync to avoid cancelling races
+                // from other competitions in the same event (e.g., Club vs Corporate).
                 $processedRaceIds = collect($updatedRaces)->pluck('id');
-                $cancelledCount = RaceResult::whereHas('discipline', function($query) use ($request) {
-                        $query->where('event_id', $request->event_id);
+                $competitionsInSync = collect($request->races)
+                    ->pluck('competition')
+                    ->map(fn($c) => $c ?: null)
+                    ->unique()
+                    ->values()
+                    ->toArray();
+
+                $hasNullCompetition = in_array(null, $competitionsInSync, true);
+                $nonNullCompetitions = array_values(array_filter($competitionsInSync, fn($c) => $c !== null));
+
+                $scopedDisciplineIds = Discipline::where('event_id', $request->event_id)
+                    ->where(function($q) use ($hasNullCompetition, $nonNullCompetitions) {
+                        if (!empty($nonNullCompetitions)) {
+                            $q->whereIn('competition', $nonNullCompetitions);
+                        }
+                        if ($hasNullCompetition) {
+                            $q->orWhereNull('competition');
+                        }
                     })
+                    ->pluck('id');
+
+                $cancelledCount = RaceResult::whereIn('discipline_id', $scopedDisciplineIds)
                     ->whereNotIn('id', $processedRaceIds)
                     ->where('status', '!=', 'FINISHED')
                     ->where('status', '!=', 'CANCELLED')
@@ -1169,7 +1190,8 @@ class RaceResultController extends BaseController
             'distance' => $distance,
             'age_group' => $ageGroup,
             'gender_group' => $genderGroup,
-            'boat_group' => $boatGroup
+            'boat_group' => $boatGroup,
+            'competition' => $raceData['competition'] ?? null
         ];
     }
 
@@ -1186,7 +1208,8 @@ class RaceResultController extends BaseController
                $discipline->distance == $params['distance'] &&
                $discipline->age_group === $params['age_group'] &&
                $discipline->gender_group === $params['gender_group'] &&
-               $discipline->boat_group === $params['boat_group'];
+               $discipline->boat_group === $params['boat_group'] &&
+               $discipline->competition === ($params['competition'] ?? null);
     }
 
     /**
