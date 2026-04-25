@@ -29,6 +29,7 @@ class UpdateDisciplineRequest extends FormRequest
             'age_group' => 'sometimes|string|max:50',
             'gender_group' => 'sometimes|string|max:20',
             'boat_group' => 'sometimes|string|max:50',
+            'competition' => 'nullable|string|max:100',
             'status' => 'sometimes|string|in:active,inactive',
         ];
     }

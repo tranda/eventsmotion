@@ -29,6 +29,7 @@ class StoreDisciplineRequest extends FormRequest
             'age_group' => 'required|string|max:50',
             'gender_group' => 'required|string|max:20',
             'boat_group' => 'required|string|max:50',
+            'competition' => 'nullable|string|max:100',
             'status' => 'sometimes|string|in:active,inactive',
         ];
     }

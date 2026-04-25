@@ -215,6 +215,7 @@ class DisciplineController extends BaseController
                 'age_group' => $request->age_group,
                 'gender_group' => $request->gender_group,
                 'boat_group' => $request->boat_group,
+                'competition' => $request->competition,
                 'status' => $request->status ?? 'active',
             ]);
 
@@ -244,6 +245,7 @@ class DisciplineController extends BaseController
             if ($request->has('age_group')) $updateData['age_group'] = $request->age_group;
             if ($request->has('gender_group')) $updateData['gender_group'] = $request->gender_group;
             if ($request->has('boat_group')) $updateData['boat_group'] = $request->boat_group;
+            if ($request->has('competition')) $updateData['competition'] = $request->competition;
             if ($request->has('status')) $updateData['status'] = $request->status;
 
             $discipline->update($updateData);
