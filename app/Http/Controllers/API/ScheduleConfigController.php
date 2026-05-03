@@ -70,7 +70,7 @@ class ScheduleConfigController extends BaseController
         }
 
         $validated = $request->validate([
-            'lane_count' => 'required|integer|in:4,6,8',
+            'lane_count' => 'required|integer|min:3|max:9',
         ]);
 
         $event->update($validated);
