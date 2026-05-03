@@ -12,6 +12,11 @@ class DisciplineProgression extends Model
     protected $fillable = [
         'discipline_id',
         'race_plan_code',
+        'custom_stages',
+    ];
+
+    protected $casts = [
+        'custom_stages' => 'array',
     ];
 
     public function discipline()

@@ -46,13 +46,18 @@ class DisciplineProgressionController extends BaseController
                 'auto_pick_code' => $autoPick,
                 'override_code' => optional($discipline->progression)->race_plan_code,
                 'effective_code' => optional($discipline->progression)->race_plan_code ?? $autoPick,
+                'custom_stages' => optional($discipline->progression)->custom_stages,
             ],
         ]);
     }
 
     /**
      * PUT /api/disciplines/{id}/progression
-     * Body: { "race_plan_code": "RP.3A" } or { "race_plan_code": null } to clear override.
+     * Body:
+     *   { "race_plan_code": "RP.3A" }                          // override
+     *   { "race_plan_code": null }                              // clear override
+     *   { "race_plan_code": "CUSTOM",
+     *     "custom_stages": ["Round 1","Round 2","Final"] }      // custom stages
      */
     public function update(Request $request, $disciplineId)
     {
@@ -63,10 +68,18 @@ class DisciplineProgressionController extends BaseController
 
         $validated = $request->validate([
             'race_plan_code' => 'present|nullable|string',
+            'custom_stages' => 'nullable|array',
+            'custom_stages.*' => 'string|max:255',
         ]);
 
         $code = $validated['race_plan_code'];
-        if ($code !== null) {
+        $customStages = $validated['custom_stages'] ?? null;
+
+        if ($code === 'CUSTOM') {
+            if (!is_array($customStages) || empty($customStages)) {
+                return $this->sendError('CUSTOM plan requires a non-empty custom_stages list.', [], 422);
+            }
+        } elseif ($code !== null) {
             try {
                 $plan = $this->plans->getPlan($code);
             } catch (InvalidArgumentException $e) {
@@ -80,14 +93,20 @@ class DisciplineProgressionController extends BaseController
                     422
                 );
             }
+            $customStages = null; // non-custom plans don't store stages
+        } else {
+            $customStages = null;
         }
 
         DisciplineProgression::updateOrCreate(
             ['discipline_id' => $discipline->id],
-            ['race_plan_code' => $code]
+            ['race_plan_code' => $code, 'custom_stages' => $customStages]
         );
 
-        return $this->sendResponse(['race_plan_code' => $code], 'Progression updated.');
+        return $this->sendResponse(
+            ['race_plan_code' => $code, 'custom_stages' => $customStages],
+            'Progression updated.'
+        );
     }
 
     /** GET /api/disciplines/{id}/race-plan-options */
@@ -102,11 +121,17 @@ class DisciplineProgressionController extends BaseController
         $laneCount = optional($discipline->event)->lane_count;
 
         if (!$laneCount || $crewCount < 2) {
-            return $this->sendResponse(['options' => []], 'No options available.');
+            // Even with no IDBF plans available, allow CUSTOM so organizers
+            // can still define their own stage list.
+            return $this->sendResponse(['options' => ['CUSTOM']], 'Only CUSTOM available.');
         }
 
+        $options = $this->plans->planOptions($laneCount, $crewCount);
+        // CUSTOM is always available — lets organizers define their own stage list.
+        $options[] = 'CUSTOM';
+
         return $this->sendResponse(
-            ['options' => $this->plans->planOptions($laneCount, $crewCount)],
+            ['options' => $options],
             'Race plan options.'
         );
     }

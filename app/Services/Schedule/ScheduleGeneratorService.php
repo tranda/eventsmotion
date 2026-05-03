@@ -121,6 +121,29 @@ class ScheduleGeneratorService
             return;
         }
 
+        // CUSTOM plan: use organizer-defined stage list, no IDBF seeding.
+        if (optional($discipline->progression)->race_plan_code === 'CUSTOM') {
+            $stages = optional($discipline->progression)->custom_stages;
+            if (!is_array($stages) || empty($stages)) {
+                $result->addWarning("{$discipline->getDisplayName()}: CUSTOM plan has no stages defined.");
+                return;
+            }
+            $disciplineRaceCount = 0;
+            foreach ($stages as $stageName) {
+                RaceResult::create([
+                    'race_number' => 0,
+                    'discipline_id' => $discipline->id,
+                    'race_time' => null,
+                    'stage' => (string) $stageName,
+                    'status' => 'SCHEDULED',
+                ]);
+                $disciplineRaceCount++;
+                $result->racesCreated++;
+            }
+            $result->racesPerDiscipline[$discipline->id] = $disciplineRaceCount;
+            return;
+        }
+
         try {
             $plan = $this->resolvePlan($discipline, $laneCount, $crewCount);
         } catch (OutOfRangeException $e) {
