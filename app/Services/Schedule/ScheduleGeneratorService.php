@@ -300,6 +300,43 @@ class ScheduleGeneratorService
         }
     }
 
+    /**
+     * Shift all SCHEDULED races at-or-after the pivot's race_time by N minutes
+     * (signed). If $sameDayOnly is true, only races on the same calendar date
+     * as the pivot are affected. Returns the number of races shifted.
+     */
+    public function shiftFrom(RaceResult $pivot, int $minutes, bool $sameDayOnly = true): int
+    {
+        if ($minutes === 0 || $pivot->race_time === null) {
+            return 0;
+        }
+        $eventId = $pivot->discipline?->event_id;
+        if (!$eventId) {
+            return 0;
+        }
+        $pivotTime = Carbon::parse($pivot->race_time);
+
+        $query = RaceResult::whereHas('discipline', fn($q) => $q->where('event_id', $eventId))
+            ->where('status', 'SCHEDULED')
+            ->whereNotNull('race_time')
+            ->where('race_time', '>=', $pivotTime);
+
+        if ($sameDayOnly) {
+            $query->whereDate('race_time', $pivotTime->toDateString());
+        }
+
+        $count = 0;
+        DB::transaction(function () use ($query, $minutes, &$count) {
+            $races = $query->get();
+            foreach ($races as $race) {
+                $race->race_time = Carbon::parse($race->race_time)->addMinutes($minutes);
+                $race->save();
+                $count++;
+            }
+        });
+        return $count;
+    }
+
     /** @param ScheduleBlock[] $orderedBlocks */
     private function findMatchingBlock(RaceResult $race, array $orderedBlocks): ?ScheduleBlock
     {

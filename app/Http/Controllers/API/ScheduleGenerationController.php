@@ -5,9 +5,11 @@ namespace App\Http\Controllers\API;
 use App\Http\Controllers\API\BaseController as BaseController;
 use App\Models\Discipline;
 use App\Models\Event;
+use App\Models\RaceResult;
 use App\Services\Schedule\LaneSeeder;
 use App\Services\Schedule\ScheduleGeneratorService;
 use Carbon\Carbon;
+use Illuminate\Http\Request;
 use InvalidArgumentException;
 use Throwable;
 
@@ -111,6 +113,45 @@ class ScheduleGenerationController extends BaseController
         ], $result->seededStage !== null
             ? "Seeded {$result->seededStage}."
             : ($result->skippedReason ?? 'No stage to seed.'));
+    }
+
+    /**
+     * POST /api/events/{id}/schedule/shift
+     * Shifts all SCHEDULED races at-or-after the pivot race's race_time by
+     * N minutes (signed). If same_day_only is true (default), only races on
+     * the same calendar day as the pivot are affected.
+     */
+    public function shift(Request $request, $eventId)
+    {
+        $event = Event::find($eventId);
+        if (!$event) {
+            return $this->sendError('Event not found', [], 404);
+        }
+
+        $validated = $request->validate([
+            'from_race_id' => 'required|integer|exists:race_results,id',
+            'minutes' => 'required|integer|min:-720|max:720',
+            'same_day_only' => 'nullable|boolean',
+        ]);
+
+        $pivot = RaceResult::with('discipline')->find($validated['from_race_id']);
+        if (!$pivot || $pivot->discipline?->event_id !== $event->id) {
+            return $this->sendError('Pivot race does not belong to this event', [], 422);
+        }
+        if ($pivot->race_time === null) {
+            return $this->sendError('Pivot race has no race_time set', [], 422);
+        }
+
+        $count = $this->generator->shiftFrom(
+            $pivot,
+            (int) $validated['minutes'],
+            $validated['same_day_only'] ?? true,
+        );
+
+        return $this->sendResponse(
+            ['races_shifted' => $count, 'minutes' => (int) $validated['minutes']],
+            "Shifted {$count} race(s) by {$validated['minutes']} minute(s).",
+        );
     }
 
     /** POST /api/events/{id}/schedule/unpublish */

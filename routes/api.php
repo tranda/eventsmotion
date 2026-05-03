@@ -171,6 +171,7 @@ Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::post('disciplines/{discipline}/schedule/seed-next-round', [ScheduleGenerationController::class, 'seedNextRound']);
     Route::post('events/{event}/schedule/publish', [ScheduleGenerationController::class, 'publish']);
     Route::post('events/{event}/schedule/unpublish', [ScheduleGenerationController::class, 'unpublish']);
+    Route::post('events/{event}/schedule/shift', [ScheduleGenerationController::class, 'shift']);
 });
 
 Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
