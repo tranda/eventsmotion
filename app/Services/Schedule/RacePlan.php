@@ -95,10 +95,62 @@ class RacePlan
         }
 
         $lanes = $this->data[$key][$heatNum];
+        $laneCount = $this->laneCount();
+
+        // When crewCount < laneCount, the IDBF rotation can leave centre lanes
+        // empty (a seed > crewCount lands in the middle). Per IDBF "fastest in
+        // centre" rule, gaps should be on the outside, so we override with a
+        // centre-out compact allocation. Sacrifices per-round rotation for
+        // partial counts, but that's preferable to centre gaps.
+        if ($crewCount < $laneCount) {
+            return $this->compactCentreOut($laneCount, $crewCount, $heatNum);
+        }
+
         return array_map(
             fn($seed) => ($seed !== null && $seed <= $crewCount) ? $seed : null,
             $lanes
         );
+    }
+
+    /**
+     * Returns a [lane => seed|null] map placing seeds 1..$crewCount centre-out.
+     * Rotates the seed order per round so crews still see varied lane positions
+     * across multiple rounds.
+     */
+    private function compactCentreOut(int $laneCount, int $crewCount, int $roundNum): array
+    {
+        $assignment = [];
+        for ($i = 1; $i <= $laneCount; $i++) {
+            $assignment[$i] = null;
+        }
+        if ($crewCount <= 0) {
+            return $assignment;
+        }
+
+        // Build lane order centre-out: e.g. 4 lanes → [3,2,4,1]; 6 → [4,3,5,2,6,1].
+        $centre = (int) ceil(($laneCount + 1) / 2);
+        $order = [$centre];
+        for ($d = 1; $d < $laneCount; $d++) {
+            $left = $centre - $d;
+            $right = $centre + $d;
+            if ($left >= 1) {
+                $order[] = $left;
+            }
+            if ($right <= $laneCount) {
+                $order[] = $right;
+            }
+        }
+
+        // Build seed order with a per-round rotation so crews don't always sit
+        // in the same lane across all rounds.
+        $seeds = range(1, $crewCount);
+        $shift = ($roundNum - 1) % $crewCount;
+        $seeds = array_merge(array_slice($seeds, $shift), array_slice($seeds, 0, $shift));
+
+        for ($i = 0; $i < $crewCount && $i < count($order); $i++) {
+            $assignment[$order[$i]] = $seeds[$i];
+        }
+        return $assignment;
     }
 
     /**
