@@ -23,7 +23,10 @@ class Event extends Model
         'small_max_gender',
         'race_entries_lock',
         'name_entries_lock',
-        'crew_entries_lock'
+        'crew_entries_lock',
+        'lane_count',
+        'schedule_status',
+        'schedule_published_at',
     ];
 
     protected $dates = ['deleted_at'];
@@ -33,10 +36,17 @@ class Event extends Model
         'race_entries_lock' => 'datetime',
         'name_entries_lock' => 'datetime',
         'crew_entries_lock' => 'datetime',
+        'schedule_published_at' => 'datetime',
+        'lane_count' => 'integer',
     ];
 
     public function disciplines()
     {
         return $this->hasMany(Discipline::class);
+    }
+
+    public function eventDays()
+    {
+        return $this->hasMany(EventDay::class)->orderBy('sort_order');
     }
 }

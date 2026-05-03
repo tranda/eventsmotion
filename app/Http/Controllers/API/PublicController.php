@@ -19,8 +19,9 @@ class PublicController extends BaseController
     public function getRaceResults($eventId)
     {
         try {
-            // Verify the event exists
-            $event = Event::find($eventId);
+            // Verify the event exists and its schedule has been published.
+            // Drafts are hidden from public/non-admin callers.
+            $event = Event::where('schedule_status', 'published')->find($eventId);
             if (!$event) {
                 return $this->sendError('Event not found', [], 404);
             }

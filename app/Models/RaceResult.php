@@ -408,4 +408,15 @@ class RaceResult extends Model
             $q->where('event_id', $eventId);
         });
     }
+
+    /**
+     * Scope to results that belong to events whose schedule has been published.
+     * Used by public/non-admin callers so draft schedules stay hidden.
+     */
+    public function scopePublished($query)
+    {
+        return $query->whereHas('discipline.event', function ($q) {
+            $q->where('schedule_status', 'published');
+        });
+    }
 }

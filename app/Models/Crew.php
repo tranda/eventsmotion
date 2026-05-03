@@ -12,7 +12,12 @@ class Crew extends Model
 	
 	protected $fillable = [
         'team_id',
-        'discipline_id'
+        'discipline_id',
+        'seed_number',
+    ];
+
+    protected $casts = [
+        'seed_number' => 'integer',
     ];
 
     public function team()

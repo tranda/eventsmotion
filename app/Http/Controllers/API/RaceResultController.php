@@ -35,17 +35,29 @@ class RaceResultController extends BaseController
                 return $this->sendError('Event ID is required', [], 422);
             }
 
-            // Get all races for the event regardless of status
+            // Hide draft schedules from non-admin callers. Admins can opt in to
+            // drafts with ?include_drafts=1 (used by the schedule builder UI).
+            $user = $request->user();
+            $isAdmin = $user && ($user->access_level ?? 0) >= 3;
+            $includeDrafts = $isAdmin && $request->boolean('include_drafts');
+
+            $applyPublishedFilter = fn($query) => $includeDrafts ? $query : $query->published();
+
+            // Get all races for the event regardless of completion status
             try {
-                $raceResults = RaceResult::with(['discipline', 'crewResults.crew.team.club'])
-                    ->forEvent($eventId)
+                $raceResults = $applyPublishedFilter(
+                    RaceResult::with(['discipline', 'crewResults.crew.team.club'])
+                        ->forEvent($eventId)
+                )
                     ->orderBy('race_number', 'asc')
                     ->get();
             } catch (\Exception $e) {
                 \Log::error("Error loading race results with crews: " . $e->getMessage());
                 // Fallback to basic loading
-                $raceResults = RaceResult::with(['discipline', 'crewResults.crew'])
-                    ->forEvent($eventId)
+                $raceResults = $applyPublishedFilter(
+                    RaceResult::with(['discipline', 'crewResults.crew'])
+                        ->forEvent($eventId)
+                )
                     ->orderBy('race_number', 'asc')
                     ->get();
             }

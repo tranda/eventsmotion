@@ -29,6 +29,11 @@ class Discipline extends Model
         return $this->hasMany(Crew::class);
     }
 
+    public function progression()
+    {
+        return $this->hasOne(DisciplineProgression::class);
+    }
+
     /**
      * Get the display name for this discipline.
      * Generates a title like "Men's K1 500m" from the discipline attributes.

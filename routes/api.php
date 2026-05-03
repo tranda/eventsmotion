@@ -18,6 +18,10 @@ use App\Http\Controllers\API\PublicController;
 use App\Http\Controllers\API\ApiKeyController;
 use App\Http\Controllers\API\PasswordResetController;
 use App\Http\Controllers\API\DatabaseBackupController;
+use App\Http\Controllers\API\ScheduleConfigController;
+use App\Http\Controllers\API\ScheduleGenerationController;
+use App\Http\Controllers\API\DisciplineProgressionController;
+use App\Http\Controllers\API\CrewSeedController;
 
 /*
 |--------------------------------------------------------------------------
@@ -140,6 +144,34 @@ Route::middleware('auth:sanctum')->delete('race-results/{id}', [RaceResultContro
 Route::middleware('auth:sanctum')->get('race-results/{raceResultId}/crew-results', [RaceResultController::class, 'getCrewResults']);
 Route::middleware('auth:sanctum')->post('race-results/{raceResultId}/crew-results', [RaceResultController::class, 'storeCrewResults']);
 Route::middleware('auth:sanctum')->post('race-results/{raceResultId}/recalculate-positions', [RaceResultController::class, 'recalculatePositions']);
+
+// Schedule Builder (admin only)
+Route::middleware(['auth:sanctum', 'admin'])->group(function () {
+    // Schedule config: lane count + days + blocks
+    Route::get('events/{event}/schedule-config', [ScheduleConfigController::class, 'show']);
+    Route::put('events/{event}/schedule-config', [ScheduleConfigController::class, 'update']);
+    Route::post('events/{event}/event-days', [ScheduleConfigController::class, 'storeDay']);
+    Route::put('event-days/{day}', [ScheduleConfigController::class, 'updateDay']);
+    Route::delete('event-days/{day}', [ScheduleConfigController::class, 'destroyDay']);
+    Route::post('event-days/{day}/blocks', [ScheduleConfigController::class, 'storeBlock']);
+    Route::put('schedule-blocks/{block}', [ScheduleConfigController::class, 'updateBlock']);
+    Route::delete('schedule-blocks/{block}', [ScheduleConfigController::class, 'destroyBlock']);
+
+    // Per-discipline plan override + crew seeds
+    Route::get('disciplines/{discipline}/progression', [DisciplineProgressionController::class, 'show']);
+    Route::put('disciplines/{discipline}/progression', [DisciplineProgressionController::class, 'update']);
+    Route::get('disciplines/{discipline}/race-plan-options', [DisciplineProgressionController::class, 'options']);
+    Route::get('disciplines/{discipline}/crew-seeds', [CrewSeedController::class, 'show']);
+    Route::put('disciplines/{discipline}/crew-seeds', [CrewSeedController::class, 'update']);
+    Route::post('disciplines/{discipline}/crew-seeds/reset', [CrewSeedController::class, 'reset']);
+
+    // Generation, regeneration, publish
+    Route::post('events/{event}/schedule/generate', [ScheduleGenerationController::class, 'generate']);
+    Route::post('disciplines/{discipline}/schedule/regenerate', [ScheduleGenerationController::class, 'regenerateDiscipline']);
+    Route::post('disciplines/{discipline}/schedule/seed-next-round', [ScheduleGenerationController::class, 'seedNextRound']);
+    Route::post('events/{event}/schedule/publish', [ScheduleGenerationController::class, 'publish']);
+    Route::post('events/{event}/schedule/unpublish', [ScheduleGenerationController::class, 'unpublish']);
+});
 
 Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
     return $request->user();
