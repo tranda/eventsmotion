@@ -14,9 +14,11 @@ return new class extends Migration
             $table->string('name');
             $table->time('start_time');
             $table->unsignedInteger('gap_seconds')->default(240);
-            $table->json('gender_filter')->nullable();
-            $table->json('distance_filter')->nullable();
-            $table->json('stage_filter')->nullable();
+            // text (not json) — older MariaDB doesn't accept the JSON column
+            // type. Model casts ('array') handle JSON encode/decode at runtime.
+            $table->text('gender_filter')->nullable();
+            $table->text('distance_filter')->nullable();
+            $table->text('stage_filter')->nullable();
             $table->unsignedSmallInteger('sort_order')->default(0);
             $table->timestamps();
 
