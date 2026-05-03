@@ -49,6 +49,7 @@ class ScheduleConfigController extends BaseController
                         'gender_filter' => $b->gender_filter,
                         'distance_filter' => $b->distance_filter,
                         'stage_filter' => $b->stage_filter,
+                        'competition_filter' => $b->competition_filter,
                         'sort_order' => $b->sort_order,
                     ]),
                 ]),
@@ -189,6 +190,8 @@ class ScheduleConfigController extends BaseController
             'distance_filter.*' => 'string',
             'stage_filter' => 'nullable|array',
             'stage_filter.*' => 'string',
+            'competition_filter' => 'nullable|array',
+            'competition_filter.*' => 'string',
             'sort_order' => 'nullable|integer',
         ];
         return $request->validate($rules);

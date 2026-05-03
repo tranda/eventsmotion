@@ -338,6 +338,13 @@ class ScheduleGeneratorService
                 return false;
             }
         }
+        if (is_array($block->competition_filter) && !empty($block->competition_filter)) {
+            $competition = (string) ($discipline->competition ?? '');
+            $needles = array_map(fn($v) => strtolower((string) $v), $block->competition_filter);
+            if (!in_array(strtolower($competition), $needles, true)) {
+                return false;
+            }
+        }
         return true;
     }
 

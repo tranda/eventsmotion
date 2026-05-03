@@ -17,6 +17,7 @@ class ScheduleBlock extends Model
         'gender_filter',
         'distance_filter',
         'stage_filter',
+        'competition_filter',
         'sort_order',
     ];
 
@@ -24,6 +25,7 @@ class ScheduleBlock extends Model
         'gender_filter' => 'array',
         'distance_filter' => 'array',
         'stage_filter' => 'array',
+        'competition_filter' => 'array',
     ];
 
     public function eventDay()
