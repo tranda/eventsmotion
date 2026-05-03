@@ -22,7 +22,7 @@ class IdbfRacePlans
 
     public function __construct(?array $plans = null)
     {
-        $this->plans = $plans ?? config('idbf_race_plans');
+        $this->plans = $plans ?? config('idbf_race_plans') ?? [];
     }
 
     /**
