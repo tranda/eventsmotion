@@ -364,7 +364,13 @@ class ScheduleGeneratorService
             }
         }
         if (is_array($block->distance_filter) && !empty($block->distance_filter)) {
-            if (!in_array((string) $discipline->distance, array_map('strval', $block->distance_filter), true)) {
+            // Normalize both sides to digits-only so "200m" / "200" / 200 all match.
+            $needles = array_map(
+                fn($v) => preg_replace('/\D/', '', (string) $v),
+                $block->distance_filter,
+            );
+            $needles = array_filter($needles, fn($v) => $v !== '');
+            if (!in_array((string) $discipline->distance, $needles, true)) {
                 return false;
             }
         }
