@@ -353,7 +353,13 @@ class ScheduleGeneratorService
     private function blockMatches(ScheduleBlock $block, Discipline $discipline, string $stageName): bool
     {
         if (is_array($block->gender_filter) && !empty($block->gender_filter)) {
-            if (!in_array($discipline->gender_group, $block->gender_filter, true)) {
+            // Map legacy short codes (M/W/X) to discipline.gender_group values.
+            $map = ['M' => 'Open', 'W' => 'Women', 'X' => 'Mixed'];
+            $needles = array_map(
+                fn($v) => $map[strtoupper((string) $v)] ?? $v,
+                $block->gender_filter,
+            );
+            if (!in_array($discipline->gender_group, $needles, true)) {
                 return false;
             }
         }

@@ -185,7 +185,7 @@ class ScheduleConfigController extends BaseController
             'start_time' => ($isCreate ? 'required' : 'sometimes') . '|date_format:H:i,H:i:s',
             'gap_seconds' => ($isCreate ? 'required' : 'sometimes') . '|integer|min:30|max:7200',
             'gender_filter' => 'nullable|array',
-            'gender_filter.*' => 'string|in:M,W,X',
+            'gender_filter.*' => 'string|in:Open,Women,Mixed,M,W,X',
             'distance_filter' => 'nullable|array',
             'distance_filter.*' => 'string',
             'stage_filter' => 'nullable|array',
