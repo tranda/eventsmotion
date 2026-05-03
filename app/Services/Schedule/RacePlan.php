@@ -11,10 +11,14 @@ use InvalidArgumentException;
  */
 class RacePlan
 {
-    public function __construct(
-        public readonly string $code,
-        private readonly array $data,
-    ) {}
+    public string $code;
+    private array $data;
+
+    public function __construct(string $code, array $data)
+    {
+        $this->code = $code;
+        $this->data = $data;
+    }
 
     public function laneCount(): int
     {
