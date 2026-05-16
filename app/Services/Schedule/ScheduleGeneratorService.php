@@ -29,14 +29,10 @@ class ScheduleGeneratorService
     /**
      * Regenerate the full schedule for an event.
      *
-     * @throws InvalidArgumentException if event.lane_count is not 4/6/8 or if no event days/blocks exist
+     * @throws InvalidArgumentException if no event days/blocks exist
      */
     public function generate(Event $event): GenerationResult
     {
-        if (!in_array($event->lane_count, [4, 6, 8], true)) {
-            throw new InvalidArgumentException("event.lane_count must be 4, 6, or 8 (got {$event->lane_count})");
-        }
-
         $eventDays = $event->eventDays()->with('blocks')->get();
         if ($eventDays->isEmpty()) {
             throw new InvalidArgumentException('Event has no days configured. Add days and blocks before generating.');
@@ -76,10 +72,6 @@ class ScheduleGeneratorService
         if (!$event) {
             throw new InvalidArgumentException("Discipline {$discipline->id} has no event");
         }
-        if (!in_array($event->lane_count, [4, 6, 8], true)) {
-            throw new InvalidArgumentException("event.lane_count must be 4, 6, or 8");
-        }
-
         $hasNonScheduled = RaceResult::where('discipline_id', $discipline->id)
             ->where('status', '!=', 'SCHEDULED')
             ->exists();
