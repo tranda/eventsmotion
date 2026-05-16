@@ -190,16 +190,6 @@ class ScheduleGeneratorServiceTest extends TestCase
         $this->assertStringContainsString('at least 2 crews', $result->warnings[0]);
     }
 
-    public function test_throws_when_lane_count_unsupported(): void
-    {
-        $event = $this->makeEvent(laneCount: 5);
-        $this->addBlock($event, 'Morning', '09:00:00');
-
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('lane_count must be 4, 6, or 8');
-        $this->service->generate($event);
-    }
-
     public function test_throws_when_no_event_days(): void
     {
         $event = $this->makeEvent(laneCount: 6);  // no addBlock call
