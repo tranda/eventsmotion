@@ -413,6 +413,15 @@ class ScheduleGeneratorService
     }
 
     /**
+     * Public entry point to renumber an event's races by chronological order.
+     * Used by edit/reorder flows that update race_time outside generation.
+     */
+    public function renumberEventRaces(Event $event): void
+    {
+        $this->renumberRaces($event);
+    }
+
+    /**
      * Assign sequential race_number across the event in chronological order.
      * Races without a race_time (no matching block) get pushed to the end and
      * keep race_number 0 so they're easy to spot in the UI.

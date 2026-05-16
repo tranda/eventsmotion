@@ -1700,4 +1700,73 @@ class RaceResultController extends BaseController
         // "BigBoat" -> "Big Boat"
         return preg_replace('/([a-z])([A-Z])/', '$1 $2', $field);
     }
+
+    /**
+     * Bulk-update race_time values for a slice of races (drag-reorder in Grid tab).
+     * All races must be SCHEDULED. Renumbers the affected event(s) after update.
+     *
+     * Request body:
+     *   { "updates": [ { "race_id": int, "race_time": ISO8601 string }, ... ] }
+     *
+     * Response 200: { "success": true, "updated": N }
+     * Response 422: validation or status-guard failure (atomic — no writes).
+     */
+    public function reorder(\Illuminate\Http\Request $request)
+    {
+        try {
+            $request->validate([
+                'updates' => 'required|array|min:1|max:200',
+                'updates.*.race_id' => 'required|integer|exists:race_results,id',
+                'updates.*.race_time' => 'required|date',
+            ]);
+
+            $updates = $request->input('updates');
+            $raceIds = array_column($updates, 'race_id');
+            $races = \App\Models\RaceResult::whereIn('id', $raceIds)->get()->keyBy('id');
+
+            // Reject if any race is not SCHEDULED.
+            foreach ($races as $race) {
+                if ($race->status !== 'SCHEDULED') {
+                    return $this->sendError(
+                        'Validation error',
+                        ['updates' => ["Race {$race->id} is {$race->status} and cannot be reordered."]],
+                        422
+                    );
+                }
+            }
+
+            // Find the unique event(s) touched so we can renumber after writes.
+            $eventIds = $races
+                ->map(fn($r) => $r->discipline?->event_id)
+                ->filter()
+                ->unique()
+                ->values();
+
+            \Illuminate\Support\Facades\DB::transaction(function () use ($updates, $races) {
+                foreach ($updates as $u) {
+                    $race = $races[$u['race_id']];
+                    $race->race_time = $u['race_time'];
+                    $race->save();
+                }
+            });
+
+            $generator = app(\App\Services\Schedule\ScheduleGeneratorService::class);
+            foreach ($eventIds as $eventId) {
+                $event = \App\Models\Event::find($eventId);
+                if ($event) {
+                    $generator->renumberEventRaces($event);
+                }
+            }
+
+            return response()->json([
+                'success' => true,
+                'updated' => count($updates),
+            ], 200);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->sendError('Validation error', $e->errors(), 422);
+        } catch (\Exception $e) {
+            return $this->sendError('Error reordering races', [$e->getMessage()], 500);
+        }
+    }
 }

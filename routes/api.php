@@ -140,6 +140,7 @@ Route::middleware('auth:sanctum')->get('race-results', [RaceResultController::cl
 Route::middleware('auth:sanctum')->get('race-results/{id}', [RaceResultController::class, 'show']);
 Route::middleware('auth:sanctum')->post('race-results', [RaceResultController::class, 'store']);
 Route::middleware('auth:sanctum')->put('race-results/{id}', [RaceResultController::class, 'update']);
+Route::middleware('auth:sanctum')->post('race-results/reorder', [RaceResultController::class, 'reorder']);
 Route::middleware('auth:sanctum')->delete('race-results/{id}', [RaceResultController::class, 'destroy']);
 Route::middleware('auth:sanctum')->get('race-results/{raceResultId}/crew-results', [RaceResultController::class, 'getCrewResults']);
 Route::middleware('auth:sanctum')->post('race-results/{raceResultId}/crew-results', [RaceResultController::class, 'storeCrewResults']);
