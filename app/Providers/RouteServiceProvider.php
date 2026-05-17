@@ -46,7 +46,14 @@ class RouteServiceProvider extends ServiceProvider
     protected function configureRateLimiting()
     {
         RateLimiter::for('api', function (Request $request) {
-            return Limit::perMinute(60)->by($request->user()?->id ?: $request->ip());
+            // Authenticated users get a higher cap because admin pages
+            // (schedule builder, event detail) fan out into many requests
+            // per page load. Anonymous traffic stays at the conservative 60.
+            $user = $request->user();
+            if ($user) {
+                return Limit::perMinute(600)->by($user->id);
+            }
+            return Limit::perMinute(60)->by($request->ip());
         });
     }
 }
