@@ -85,7 +85,17 @@ class ScheduleBreakController extends BaseController
         return $this->sendResponse($break->fresh()->toArray(), 'Break created.');
     }
 
-    /** PUT /api/race-results/{id} hits the existing RaceResultController; this is a dedicated break-update endpoint used when duration/mode changes. */
+    /**
+     * Edit a break. Treats the edit as "remove this break from its old position,
+     * then re-insert it at the new position":
+     *   1. If the break WAS in shift mode, un-shift the races we previously pushed
+     *      (subtract old_duration from rows at-or-after old_time).
+     *   2. If the break IS still in shift mode after the edit, re-apply the shift
+     *      (add new_duration to rows at-or-after new_time).
+     *
+     * This means moving a break later (e.g. 09:00 → 10:00) correctly slides races
+     * back into the freed-up slot and pushes the now-later ones further out.
+     */
     public function update(Request $request, $id)
     {
         $break = RaceResult::find($id);
@@ -101,10 +111,24 @@ class ScheduleBreakController extends BaseController
         ]);
 
         DB::transaction(function () use ($break, $data) {
+            // Capture old state (we need it to un-shift before applying the new shift).
             $oldDuration = (int) ($break->duration_seconds ?? 0);
             $oldShift = (bool) $break->shift_subsequent;
             $oldTime = $break->race_time ? Carbon::parse($break->race_time) : null;
+            $oldEventId = $break->event_id;
 
+            // 1. Un-shift from old position FIRST (while we still know it).
+            $unShifted = 0;
+            if ($oldShift && $oldTime && $oldDuration > 0 && $oldEventId) {
+                $unShifted = $this->shiftLaterRowsByMinutes(
+                    $oldEventId,
+                    $oldTime,
+                    -$this->secsToMinutes($oldDuration),
+                    excludeId: $break->id,
+                );
+            }
+
+            // 2. Apply the edits.
             if (array_key_exists('race_time', $data) && $data['race_time'] !== null) {
                 $break->race_time = Carbon::parse($data['race_time']);
             }
@@ -120,21 +144,31 @@ class ScheduleBreakController extends BaseController
             }
             $break->save();
 
-            // If the break is still in shift mode and duration changed, apply the delta.
-            // Time changes are deliberately not auto-resynced; user can manually shift later races.
-            $newDuration = (int) $break->duration_seconds;
+            // 3. Re-shift from new position.
+            $newDuration = (int) ($break->duration_seconds ?? 0);
             $newShift = (bool) $break->shift_subsequent;
-            if ($newShift && $oldShift && $oldTime && $newDuration !== $oldDuration) {
-                $delta = $newDuration - $oldDuration;
-                if ($delta !== 0) {
-                    $this->shiftLaterRowsByMinutes(
-                        $break->event_id,
-                        $oldTime,
-                        $this->secsToMinutes($delta),
-                        excludeId: $break->id,
-                    );
-                }
+            $newTime = $break->race_time ? Carbon::parse($break->race_time) : null;
+            $reShifted = 0;
+            if ($newShift && $newTime && $newDuration > 0 && $break->event_id) {
+                $reShifted = $this->shiftLaterRowsByMinutes(
+                    $break->event_id,
+                    $newTime,
+                    $this->secsToMinutes($newDuration),
+                    excludeId: $break->id,
+                );
             }
+
+            \Log::info('🍴 Break updated', [
+                'break_id' => $break->id,
+                'old_time' => $oldTime?->toDateTimeString(),
+                'new_time' => $newTime?->toDateTimeString(),
+                'old_duration_sec' => $oldDuration,
+                'new_duration_sec' => $newDuration,
+                'old_shift' => $oldShift,
+                'new_shift' => $newShift,
+                'un_shifted_rows' => $unShifted,
+                're_shifted_rows' => $reShifted,
+            ]);
         });
 
         return $this->sendResponse($break->fresh()->toArray(), 'Break updated.');
