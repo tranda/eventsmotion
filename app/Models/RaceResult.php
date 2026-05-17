@@ -12,15 +12,21 @@ class RaceResult extends Model
     protected $fillable = [
         'race_number',
         'discipline_id',
+        'event_id',
         'race_time',
         'stage',
         'status',
         'images',
+        'entry_type',
+        'duration_seconds',
+        'label',
+        'shift_subsequent',
     ];
 
     protected $casts = [
         'race_time' => 'datetime',
         'images' => 'array',
+        'shift_subsequent' => 'boolean',
     ];
 
     /**
@@ -30,10 +36,25 @@ class RaceResult extends Model
 
     /**
      * Get the discipline that this race result belongs to.
+     * Null for break entries (lunch, ceremonies, etc.).
      */
     public function discipline()
     {
         return $this->belongsTo(Discipline::class);
+    }
+
+    /**
+     * Direct event link (used by break entries that have no discipline).
+     */
+    public function event()
+    {
+        return $this->belongsTo(Event::class);
+    }
+
+    /** Convenience: true if this row is a non-race entry (pause, ceremony, etc.). */
+    public function isBreak(): bool
+    {
+        return $this->entry_type === 'break';
     }
 
     /**
@@ -400,23 +421,27 @@ class RaceResult extends Model
     }
 
     /**
-     * Scope to get results for a specific event (through discipline).
+     * Scope to get results for a specific event. Includes both races
+     * (linked via discipline) and break entries (linked via event_id directly).
      */
     public function scopeForEvent($query, $eventId)
     {
-        return $query->whereHas('discipline', function ($q) use ($eventId) {
-            $q->where('event_id', $eventId);
+        return $query->where(function ($q) use ($eventId) {
+            $q->whereHas('discipline', fn($qq) => $qq->where('event_id', $eventId))
+              ->orWhere('event_id', $eventId);
         });
     }
 
     /**
      * Scope to results that belong to events whose schedule has been published.
      * Used by public/non-admin callers so draft schedules stay hidden.
+     * Covers both race rows (via discipline.event) and break rows (via event).
      */
     public function scopePublished($query)
     {
-        return $query->whereHas('discipline.event', function ($q) {
-            $q->where('schedule_status', 'published');
+        return $query->where(function ($q) {
+            $q->whereHas('discipline.event', fn($qq) => $qq->where('schedule_status', 'published'))
+              ->orWhereHas('event', fn($qq) => $qq->where('schedule_status', 'published'));
         });
     }
 }

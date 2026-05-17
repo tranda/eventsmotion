@@ -22,6 +22,7 @@ use App\Http\Controllers\API\ScheduleConfigController;
 use App\Http\Controllers\API\ScheduleGenerationController;
 use App\Http\Controllers\API\DisciplineProgressionController;
 use App\Http\Controllers\API\CrewSeedController;
+use App\Http\Controllers\API\ScheduleBreakController;
 
 /*
 |--------------------------------------------------------------------------
@@ -173,6 +174,11 @@ Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::post('events/{event}/schedule/publish', [ScheduleGenerationController::class, 'publish']);
     Route::post('events/{event}/schedule/unpublish', [ScheduleGenerationController::class, 'unpublish']);
     Route::post('events/{event}/schedule/shift', [ScheduleGenerationController::class, 'shift']);
+
+    // Non-race schedule entries (lunch, ceremony, etc.)
+    Route::post('events/{event}/schedule/breaks', [ScheduleBreakController::class, 'store']);
+    Route::put('schedule/breaks/{id}', [ScheduleBreakController::class, 'update']);
+    Route::delete('schedule/breaks/{id}', [ScheduleBreakController::class, 'destroy']);
 });
 
 Route::middleware('auth:sanctum')->get('/user', function (Request $request) {

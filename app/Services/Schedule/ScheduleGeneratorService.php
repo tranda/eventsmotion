@@ -325,13 +325,15 @@ class ScheduleGeneratorService
         if ($minutes === 0 || $pivot->race_time === null) {
             return 0;
         }
-        $eventId = $pivot->discipline?->event_id;
+        // Pivot may be a race (event via discipline) or a break (event_id direct).
+        $eventId = $pivot->discipline?->event_id ?? $pivot->event_id;
         if (!$eventId) {
             return 0;
         }
         $pivotTime = Carbon::parse($pivot->race_time);
 
-        $query = RaceResult::whereHas('discipline', fn($q) => $q->where('event_id', $eventId))
+        // Reuse RaceResult::scopeForEvent so both races and breaks are picked up.
+        $query = RaceResult::forEvent($eventId)
             ->where('status', 'SCHEDULED')
             ->whereNotNull('race_time')
             ->where('race_time', '>=', $pivotTime);
