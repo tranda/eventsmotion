@@ -57,9 +57,26 @@ class ScheduleBreakController extends BaseController
             ]);
 
             if ($shift) {
-                // Shift other rows that are at-or-after this break by the duration.
-                // Pivot must be a different row, so use a synthetic pivot at the same time.
-                $this->shiftLaterRowsByMinutes($event->id, $time, $this->secsToMinutes($break->duration_seconds), excludeId: $break->id);
+                $minutes = $this->secsToMinutes((int) $break->duration_seconds);
+                $shifted = $this->shiftLaterRowsByMinutes(
+                    $event->id,
+                    $time,
+                    $minutes,
+                    excludeId: $break->id,
+                );
+                \Log::info('🍴 Break created — shift run', [
+                    'event_id' => $event->id,
+                    'break_id' => $break->id,
+                    'break_time' => $time->toDateTimeString(),
+                    'minutes' => $minutes,
+                    'rows_shifted' => $shifted,
+                ]);
+            } else {
+                \Log::info('🎉 Break created — parallel mode, no shift', [
+                    'event_id' => $event->id,
+                    'break_id' => $break->id,
+                    'break_time' => $time->toDateTimeString(),
+                ]);
             }
 
             return $break;
