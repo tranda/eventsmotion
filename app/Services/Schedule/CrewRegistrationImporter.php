@@ -113,9 +113,19 @@ class CrewRegistrationImporter
 
                     $team = $this->findTeam($teamRow['team_name'], $teamRow['club_name']);
                     if (!$team) {
-                        $key = trim("{$teamRow['team_name']} ({$teamRow['club_name']})");
-                        if (!in_array($key, $result['unmatched_teams'], true)) {
-                            $result['unmatched_teams'][] = $key;
+                        $exists = false;
+                        foreach ($result['unmatched_teams'] as $u) {
+                            if ($u['team_name'] === $teamRow['team_name']
+                                && $u['club_name'] === $teamRow['club_name']) {
+                                $exists = true;
+                                break;
+                            }
+                        }
+                        if (!$exists) {
+                            $result['unmatched_teams'][] = [
+                                'team_name' => $teamRow['team_name'],
+                                'club_name' => $teamRow['club_name'],
+                            ];
                         }
                         continue;
                     }
