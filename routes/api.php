@@ -23,6 +23,7 @@ use App\Http\Controllers\API\ScheduleGenerationController;
 use App\Http\Controllers\API\DisciplineProgressionController;
 use App\Http\Controllers\API\CrewSeedController;
 use App\Http\Controllers\API\ScheduleBreakController;
+use App\Http\Controllers\API\CrewRegistrationController;
 
 /*
 |--------------------------------------------------------------------------
@@ -179,6 +180,9 @@ Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::post('events/{event}/schedule/breaks', [ScheduleBreakController::class, 'store']);
     Route::put('schedule/breaks/{id}', [ScheduleBreakController::class, 'update']);
     Route::delete('schedule/breaks/{id}', [ScheduleBreakController::class, 'destroy']);
+
+    // Bulk-register crews from a CSV matrix
+    Route::post('events/{event}/registrations/import', [CrewRegistrationController::class, 'import']);
 });
 
 Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
