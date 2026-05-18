@@ -26,8 +26,17 @@ use Illuminate\Support\Facades\DB;
  */
 class CrewRegistrationImporter
 {
-    /** Run the importer. When $dryRun is true the transaction is rolled back. */
-    public function importForEvent(Event $event, string $csv, bool $dryRun): array
+    /**
+     * Run the importer.
+     *
+     * @param Event  $event   the event whose disciplines/teams to match against
+     * @param string $csv     raw CSV text
+     * @param bool   $dryRun  true → rollback transaction (preview only)
+     * @param bool   $sync    true → also unregister teams whose cell is empty
+     *                        in the CSV (only for team/discipline pairs that
+     *                        are in-scope of the CSV). Destructive.
+     */
+    public function importForEvent(Event $event, string $csv, bool $dryRun, bool $sync = false): array
     {
         $sections = $this->parseCsv($csv);
 
@@ -36,9 +45,12 @@ class CrewRegistrationImporter
             'matched_count' => 0,
             'crews_created' => 0,
             'crews_skipped_existing' => 0,
+            'crews_unregistered' => 0,
+            'unregistered_pairs' => [], // ["team_name — discipline_name", ...]
             'disciplines_created' => 0,
             'unmatched_teams' => [],
             'warnings' => [],
+            'sync_mode' => $sync,
         ];
 
         DB::beginTransaction();
@@ -54,17 +66,44 @@ class CrewRegistrationImporter
                 )] = $d;
             }
 
-            // Pre-load existing crews to dedupe.
-            $existingCrews = Crew::whereHas(
+            // Pre-load existing crews to dedupe / unregister.
+            $existingCrews = Crew::with(['team', 'discipline'])->whereHas(
                 'discipline',
                 fn($q) => $q->where('event_id', $event->id),
             )->get()->keyBy(fn($c) => "{$c->team_id}-{$c->discipline_id}");
+
+            // Track (team_id, discipline_id) pairs that are marked in the CSV,
+            // and the in-scope team/discipline IDs (everything that appears as
+            // a row or column header in the CSV). Sync mode uses these to
+            // decide what to unregister.
+            $markedPairs = [];        // "team_id-discipline_id" => true
+            $inScopeTeamIds = [];     // team_id => true
+            $inScopeDisciplineIds = []; // discipline_id => true
 
             foreach ($sections as $section) {
                 $boat = $this->normalizeBoat($section['boat_group']);
                 if (!$boat) {
                     $result['warnings'][] = "Unknown boat group '{$section['boat_group']}', section skipped.";
                     continue;
+                }
+
+                // First pass: resolve column headers to existing disciplines
+                // (only existing — auto-create happens later only for marked
+                // cells, so an empty header column doesn't spawn a discipline).
+                $colToDiscipline = [];
+                foreach ($section['columns'] as $colIdx => $col) {
+                    $age = $this->normalizeAge($col['age_group']);
+                    $gender = $this->normalizeGender($col['gender_group']);
+                    $distance = $this->normalizeDistance($col['distance']);
+                    if (!$age || !$gender || !$distance) {
+                        continue;
+                    }
+                    $key = $this->disciplineKey($boat, $age, $gender, (int) $distance);
+                    $d = $disciplinesByKey[$key] ?? null;
+                    if ($d) {
+                        $colToDiscipline[$colIdx] = $d;
+                        $inScopeDisciplineIds[$d->id] = true;
+                    }
                 }
 
                 foreach ($section['team_rows'] as $teamRow) {
@@ -80,6 +119,7 @@ class CrewRegistrationImporter
                         }
                         continue;
                     }
+                    $inScopeTeamIds[$team->id] = true;
 
                     foreach ($section['columns'] as $colIdx => $col) {
                         $markIdx = $colIdx - 5;
@@ -98,9 +138,10 @@ class CrewRegistrationImporter
                             continue;
                         }
 
-                        $key = $this->disciplineKey($boat, $age, $gender, (int) $distance);
-                        $discipline = $disciplinesByKey[$key] ?? null;
+                        // Use cached resolution, or auto-create on first mark.
+                        $discipline = $colToDiscipline[$colIdx] ?? null;
                         if (!$discipline) {
+                            $key = $this->disciplineKey($boat, $age, $gender, (int) $distance);
                             $discipline = Discipline::create([
                                 'event_id' => $event->id,
                                 'boat_group' => $boat,
@@ -110,11 +151,15 @@ class CrewRegistrationImporter
                                 'status' => 'active',
                             ]);
                             $disciplinesByKey[$key] = $discipline;
+                            $colToDiscipline[$colIdx] = $discipline;
+                            $inScopeDisciplineIds[$discipline->id] = true;
                             $result['disciplines_created']++;
                         }
 
                         $result['matched_count']++;
                         $crewKey = "{$team->id}-{$discipline->id}";
+                        $markedPairs[$crewKey] = true;
+
                         if ($existingCrews->has($crewKey)) {
                             $result['crews_skipped_existing']++;
                             continue;
@@ -127,6 +172,29 @@ class CrewRegistrationImporter
                         $existingCrews->put($crewKey, $crew);
                         $result['crews_created']++;
                     }
+                }
+            }
+
+            // Sync mode: delete crews where both team and discipline are
+            // in-scope of the CSV but the cell is empty. Only touches pairs
+            // the CSV actually covers — crews for teams/disciplines outside
+            // the CSV are left alone.
+            if ($sync) {
+                foreach ($existingCrews as $crewKey => $crew) {
+                    if (isset($markedPairs[$crewKey])) {
+                        continue;
+                    }
+                    if (!isset($inScopeTeamIds[$crew->team_id])) {
+                        continue;
+                    }
+                    if (!isset($inScopeDisciplineIds[$crew->discipline_id])) {
+                        continue;
+                    }
+                    $teamName = $crew->team?->name ?? "team {$crew->team_id}";
+                    $discName = $crew->discipline?->getDisplayName() ?? "discipline {$crew->discipline_id}";
+                    $result['unregistered_pairs'][] = "{$teamName} — {$discName}";
+                    $result['crews_unregistered']++;
+                    $crew->delete();
                 }
             }
 
@@ -266,7 +334,13 @@ class CrewRegistrationImporter
 
     private function normalizeAge(?string $s): ?string
     {
-        return match (strtolower(trim((string) $s))) {
+        $key = strtolower(trim((string) $s));
+        // Spreadsheet autofill often turns U24 into 'under 24', 'under 25', …
+        // through 'under 29'. Treat any 'under N' label as U24.
+        if (preg_match('/^under\s+\d+$/', $key)) {
+            return 'U24';
+        }
+        return match ($key) {
             'premier' => 'Premier',
             'senior a' => 'Senior A',
             'senior b' => 'Senior B',
@@ -275,7 +349,7 @@ class CrewRegistrationImporter
             'junior' => 'Junior',
             'junior a' => 'Junior A',
             'junior b' => 'Junior B',
-            'under 24', 'u24' => 'U24',
+            'u24' => 'U24',
             'bcp' => 'BCP',
             'acp' => 'ACP',
             default => null,

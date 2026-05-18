@@ -27,6 +27,7 @@ class CrewRegistrationController extends BaseController
         $data = $request->validate([
             'csv' => 'required|string|max:1048576', // up to 1 MiB
             'dry_run' => 'sometimes|boolean',
+            'sync' => 'sometimes|boolean',
         ]);
 
         try {
@@ -34,6 +35,7 @@ class CrewRegistrationController extends BaseController
                 $event,
                 $data['csv'],
                 (bool) ($data['dry_run'] ?? false),
+                (bool) ($data['sync'] ?? false),
             );
         } catch (\Throwable $e) {
             \Log::error('Crew registration import failed', [
