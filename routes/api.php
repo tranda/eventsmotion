@@ -183,6 +183,7 @@ Route::middleware(['auth:sanctum', 'admin'])->group(function () {
 
     // Bulk-register crews from a CSV matrix
     Route::post('events/{event}/registrations/import', [CrewRegistrationController::class, 'import']);
+    Route::delete('events/{event}/registrations', [CrewRegistrationController::class, 'clearAll']);
 });
 
 Route::middleware('auth:sanctum')->get('/user', function (Request $request) {

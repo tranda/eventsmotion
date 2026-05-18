@@ -36,9 +36,31 @@ class CrewRegistrationImporter
      *                        in the CSV (only for team/discipline pairs that
      *                        are in-scope of the CSV). Destructive.
      */
-    public function importForEvent(Event $event, string $csv, bool $dryRun, bool $sync = false): array
-    {
+    /**
+     * @param array $teamMappings array of {csv_team_name, csv_club_name, team_id}
+     *                            — overrides name-based lookup. Lets the
+     *                            operator point a CSV row at an existing team
+     *                            whose name differs slightly (typo, alt
+     *                            spelling) without creating a duplicate.
+     */
+    public function importForEvent(
+        Event $event,
+        string $csv,
+        bool $dryRun,
+        bool $sync = false,
+        array $teamMappings = [],
+    ): array {
         $sections = $this->parseCsv($csv);
+
+        // Lookup keyed by lowercased trimmed "team|club" so we can short-circuit
+        // findTeam() for operator-resolved rows.
+        $mappingLookup = [];
+        foreach ($teamMappings as $m) {
+            $key = strtolower(trim(($m['csv_team_name'] ?? '') . '|' . ($m['csv_club_name'] ?? '')));
+            if ($key !== '|' && !empty($m['team_id'])) {
+                $mappingLookup[$key] = (int) $m['team_id'];
+            }
+        }
 
         $result = [
             'sections_parsed' => count($sections),
@@ -111,7 +133,11 @@ class CrewRegistrationImporter
                         continue;
                     }
 
-                    $team = $this->findTeam($teamRow['team_name'], $teamRow['club_name']);
+                    $team = $this->findTeamWithMappings(
+                        $teamRow['team_name'],
+                        $teamRow['club_name'],
+                        $mappingLookup,
+                    );
                     if (!$team) {
                         $exists = false;
                         foreach ($result['unmatched_teams'] as $u) {
@@ -331,6 +357,19 @@ class CrewRegistrationImporter
         return Team::whereRaw('LOWER(TRIM(name)) = ?', [$teamNeedle])
             ->whereHas('club', fn($q) => $q->whereRaw('LOWER(TRIM(name)) = ?', [$clubNeedle]))
             ->first();
+    }
+
+    /**
+     * Mapping lookup wins over name-based search — that's the whole point of
+     * the operator-supplied alias. Falls back to findTeam() otherwise.
+     */
+    private function findTeamWithMappings(string $teamName, string $clubName, array $mappingLookup): ?Team
+    {
+        $key = strtolower(trim("$teamName|$clubName"));
+        if (isset($mappingLookup[$key])) {
+            return Team::find($mappingLookup[$key]);
+        }
+        return $this->findTeam($teamName, $clubName);
     }
 
     private function normalizeBoat(?string $s): ?string
