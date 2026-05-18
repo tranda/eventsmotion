@@ -70,6 +70,9 @@ class CrewRegistrationImporter
             'crews_unregistered' => 0,
             'unregistered_pairs' => [], // ["team_name — discipline_name", ...]
             'disciplines_created' => 0,
+            'disciplines_activated' => 0,
+            'disciplines_deactivated' => 0,
+            'min_crews_per_race' => (int) ($event->min_crews_per_race ?? 3),
             'unmatched_teams' => [],
             'warnings' => [],
             'sync_mode' => $sync,
@@ -231,6 +234,30 @@ class CrewRegistrationImporter
                     $result['unregistered_pairs'][] = "{$teamName} — {$discName}";
                     $result['crews_unregistered']++;
                     $crew->delete();
+                }
+            }
+
+            // Recompute discipline status from crew count vs threshold.
+            // Runs for every discipline in the event (not just CSV-scoped) so
+            // a discipline that quietly fell below the floor before this
+            // import also gets deactivated.
+            $minCrews = (int) ($event->min_crews_per_race ?? 3);
+            $crewCounts = Crew::whereIn('discipline_id', array_map(
+                fn($d) => $d->id,
+                array_values($disciplinesByKey),
+            ))->selectRaw('discipline_id, COUNT(*) as c')
+              ->groupBy('discipline_id')
+              ->pluck('c', 'discipline_id');
+            foreach ($disciplinesByKey as $d) {
+                $count = (int) ($crewCounts[$d->id] ?? 0);
+                $desired = $count >= $minCrews ? 'active' : 'inactive';
+                if ($d->status !== $desired) {
+                    $d->update(['status' => $desired]);
+                    if ($desired === 'active') {
+                        $result['disciplines_activated']++;
+                    } else {
+                        $result['disciplines_deactivated']++;
+                    }
                 }
             }
 
