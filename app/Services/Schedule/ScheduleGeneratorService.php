@@ -47,12 +47,13 @@ class ScheduleGeneratorService
 
         $result = new GenerationResult();
 
-        DB::transaction(function () use ($event, $disciplines, $orderedBlocks, $result) {
+        $defaultRounds = (int) ($event->default_rounds ?? 3);
+        DB::transaction(function () use ($event, $disciplines, $orderedBlocks, $defaultRounds, $result) {
             $this->deleteScheduledRaces($event);
 
             // Create rows per discipline, then place into blocks.
             foreach ($disciplines as $discipline) {
-                $this->generateForDiscipline($discipline, $event->lane_count, $result);
+                $this->generateForDiscipline($discipline, $event->lane_count, $defaultRounds, $result);
             }
 
             $this->placeRacesIntoBlocks($event, $orderedBlocks, $result);
@@ -89,12 +90,18 @@ class ScheduleGeneratorService
 
         $result = new GenerationResult();
 
-        DB::transaction(function () use ($discipline, $event, $orderedBlocks, $result) {
+        $defaultRounds = (int) ($event->default_rounds ?? 3);
+        DB::transaction(function () use ($discipline, $event, $orderedBlocks, $defaultRounds, $result) {
             RaceResult::where('discipline_id', $discipline->id)
                 ->where('status', 'SCHEDULED')
                 ->delete();
 
-            $this->generateForDiscipline($discipline->fresh(['crews', 'progression']), $event->lane_count, $result);
+            $this->generateForDiscipline(
+                $discipline->fresh(['crews', 'progression']),
+                $event->lane_count,
+                $defaultRounds,
+                $result,
+            );
             $this->placeRacesIntoBlocks($event, $orderedBlocks, $result);
             $this->renumberRaces($event);
         });
@@ -103,8 +110,12 @@ class ScheduleGeneratorService
     }
 
     /** Picks the plan, ensures crews have seeds, and creates RaceResult+CrewResult rows. */
-    private function generateForDiscipline(Discipline $discipline, int $laneCount, GenerationResult $result): void
-    {
+    private function generateForDiscipline(
+        Discipline $discipline,
+        int $laneCount,
+        int $defaultRounds,
+        GenerationResult $result,
+    ): void {
         $crews = $discipline->crews()->orderBy('id')->get();
         $crewCount = $crews->count();
 
@@ -113,8 +124,10 @@ class ScheduleGeneratorService
             return;
         }
 
+        $override = optional($discipline->progression)->race_plan_code;
+
         // CUSTOM plan: use organizer-defined stage list, no IDBF seeding.
-        if (optional($discipline->progression)->race_plan_code === 'CUSTOM') {
+        if ($override === 'CUSTOM') {
             $stages = optional($discipline->progression)->custom_stages;
             if (!is_array($stages) || empty($stages)) {
                 $result->addWarning("{$discipline->getDisplayName()}: CUSTOM plan has no stages defined.");
@@ -133,6 +146,22 @@ class ScheduleGeneratorService
                 $result->racesCreated++;
             }
             $result->racesPerDiscipline[$discipline->id] = $disciplineRaceCount;
+            return;
+        }
+
+        // ROUNDS plan: when all crews fit on the course (crewCount <= laneCount)
+        // we don't need elimination structure (heats/repechages/semis). Create
+        // N rounds with all crews racing each round, centre-out lane seeding,
+        // rotated per round so crews don't always sit in the same lane.
+        // Skipped if the organizer set an explicit plan-code override.
+        if (!$override && $crewCount <= $laneCount && $defaultRounds > 0) {
+            $this->generateRoundsForDiscipline(
+                $discipline,
+                $laneCount,
+                $crewCount,
+                $defaultRounds,
+                $result,
+            );
             return;
         }
 
@@ -446,5 +475,91 @@ class ScheduleGeneratorService
             }
             $race->save();
         }
+    }
+
+    /**
+     * Generate N "Round k" races with all crews racing each round. Lane seeding
+     * is centre-out (fastest seed in the centre lane, slower outward) and
+     * rotated per round so crews don't always sit in the same lane.
+     */
+    private function generateRoundsForDiscipline(
+        Discipline $discipline,
+        int $laneCount,
+        int $crewCount,
+        int $rounds,
+        GenerationResult $result,
+    ): void {
+        $this->ensureCrewSeeds($discipline, $discipline->crews()->orderBy('id')->get());
+        $crews = $discipline->crews()->orderBy('id')->get();
+        $crewsBySeed = $crews->keyBy('seed_number');
+
+        $disciplineRaceCount = 0;
+        for ($r = 1; $r <= $rounds; $r++) {
+            $race = RaceResult::create([
+                'race_number' => 0, // renumbered later
+                'discipline_id' => $discipline->id,
+                'race_time' => null,
+                'stage' => "Round {$r}",
+                'status' => 'SCHEDULED',
+            ]);
+            $disciplineRaceCount++;
+            $result->racesCreated++;
+
+            foreach ($this->roundLaneSeeding($laneCount, $crewCount, $r) as $lane => $seedNumber) {
+                if ($seedNumber === null) {
+                    continue;
+                }
+                $crew = $crewsBySeed->get($seedNumber);
+                if (!$crew) {
+                    continue;
+                }
+                CrewResult::create([
+                    'race_result_id' => $race->id,
+                    'crew_id' => $crew->id,
+                    'lane' => $lane,
+                    'status' => null,
+                ]);
+                $result->crewLanesAssigned++;
+            }
+        }
+        $result->racesPerDiscipline[$discipline->id] = $disciplineRaceCount;
+    }
+
+    /**
+     * @return array<int, int|null> lane (1..laneCount) → seed_number or null
+     */
+    private function roundLaneSeeding(int $laneCount, int $crewCount, int $roundNum): array
+    {
+        $assignment = [];
+        for ($i = 1; $i <= $laneCount; $i++) {
+            $assignment[$i] = null;
+        }
+        if ($crewCount <= 0) {
+            return $assignment;
+        }
+
+        // Centre-out lane order. 4 lanes → [3,2,4,1]; 6 → [4,3,5,2,6,1]; 3 → [2,1,3].
+        $centre = (int) ceil(($laneCount + 1) / 2);
+        $order = [$centre];
+        for ($d = 1; $d < $laneCount; $d++) {
+            $left = $centre - $d;
+            $right = $centre + $d;
+            if ($left >= 1) {
+                $order[] = $left;
+            }
+            if ($right <= $laneCount) {
+                $order[] = $right;
+            }
+        }
+
+        // Per-round rotation so crews don't always sit in the same lane.
+        $seeds = range(1, $crewCount);
+        $shift = ($roundNum - 1) % $crewCount;
+        $seeds = array_merge(array_slice($seeds, $shift), array_slice($seeds, 0, $shift));
+
+        for ($i = 0; $i < $crewCount && $i < count($order); $i++) {
+            $assignment[$order[$i]] = $seeds[$i];
+        }
+        return $assignment;
     }
 }

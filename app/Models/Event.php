@@ -25,6 +25,7 @@ class Event extends Model
         'name_entries_lock',
         'crew_entries_lock',
         'lane_count',
+        'default_rounds',
         'schedule_status',
         'schedule_published_at',
     ];
@@ -38,6 +39,7 @@ class Event extends Model
         'crew_entries_lock' => 'datetime',
         'schedule_published_at' => 'datetime',
         'lane_count' => 'integer',
+        'default_rounds' => 'integer',
     ];
 
     public function disciplines()

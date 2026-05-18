@@ -34,6 +34,7 @@ class ScheduleConfigController extends BaseController
             'data' => [
                 'event_id' => $event->id,
                 'lane_count' => $event->lane_count,
+                'default_rounds' => $event->default_rounds ?? 3,
                 'schedule_status' => $event->schedule_status,
                 'schedule_published_at' => $event->schedule_published_at,
                 'days' => $event->eventDays->map(fn(EventDay $day) => [
@@ -70,12 +71,16 @@ class ScheduleConfigController extends BaseController
         }
 
         $validated = $request->validate([
-            'lane_count' => 'required|integer|in:3,4,6,8,9',
+            'lane_count' => 'sometimes|integer|in:3,4,6,8,9',
+            'default_rounds' => 'sometimes|integer|min:1|max:10',
         ]);
 
         $event->update($validated);
 
-        return $this->sendResponse($event->only(['id', 'lane_count', 'schedule_status']), 'Schedule config updated.');
+        return $this->sendResponse(
+            $event->only(['id', 'lane_count', 'default_rounds', 'schedule_status']),
+            'Schedule config updated.',
+        );
     }
 
     /** POST /api/events/{id}/event-days */
