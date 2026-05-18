@@ -34,6 +34,36 @@
 return [
 
     // -------------------------------------------------------------------
+    // 3-LANE PLANS  (custom — not in the IDBF v2 PDF; designed to guarantee
+    // every crew at least 2 races on a 3-lane course)
+    // -------------------------------------------------------------------
+
+    // 4 crews: 2 heats (2 vs 2) → repechage of heat-2nds → grand final of
+    // heat-1sts + rep winner. Every crew gets at least 2 races.
+    'RP.1_3L' => [
+        'lane_count' => 3,
+        'crew_count_range' => [4, 4],
+        'stages' => ['Heat 1', 'Heat 2', 'Repechage 1', 'Grand Final'],
+        'heat_lane_seeding' => [
+            1 => [1 => 4, 2 => 1, 3 => null],
+            2 => [1 => 3, 2 => 2, 3 => null],
+        ],
+        'repechage_lane_seeding' => [
+            1 => [1 => '4th in hts', 2 => '3rd in hts', 3 => null],
+        ],
+        'grand_final_lane_seeding' => [
+            1 => '2nd in hts', 2 => '1st in hts', 3 => '1st in reps',
+        ],
+        'advancement' => [
+            '4 crews split into 2 heats (2 vs 2).',
+            '1st of each heat → Grand Final.',
+            '2nd of each heat → Repechage.',
+            'Winner of the Repechage → Grand Final (3 crews total).',
+            'Every crew races at least twice.',
+        ],
+    ],
+
+    // -------------------------------------------------------------------
     // 4-LANE PLANS
     // -------------------------------------------------------------------
 
