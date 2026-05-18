@@ -163,6 +163,36 @@ class IdbfRacePlansTest extends TestCase
         $this->assertSame([1 => null, 2 => 6, 3 => 2, 4 => 3, 5 => 7, 6 => null], $plan->heatLaneSeeding(2, 8));
     }
 
+    public function test_rp_1_promotes_seed_into_earlier_heat_for_seven_crews(): void
+    {
+        // RP.1 page 6: with 7 crews the PDF specifies H1=4, H2=3.
+        // The raw table puts seed 8 in H1L4, so naively dropping seed 8 would
+        // give H1=3, H2=4. The "earlier heats fuller" IDBF rule promotes
+        // seed 7 from H2L4 into the vacant H1L4 slot.
+        $plan = $this->plans->getPlan('RP.1');
+
+        $this->assertSame([1 => 4, 2 => 3], $plan->heatComposition(7));
+        $this->assertSame([1 => 5, 2 => 1, 3 => 4, 4 => 7], $plan->heatLaneSeeding(1, 7));
+        $this->assertSame([1 => 6, 2 => 2, 3 => 3, 4 => null], $plan->heatLaneSeeding(2, 7));
+    }
+
+    public function test_rp_1a_promotes_seed_into_earlier_heat_for_seven_crews(): void
+    {
+        // Same rebalance on the 6-lane inner-four variant (RP.1A).
+        // Outer lanes 1 and 6 stay null per the plan's structural layout.
+        $plan = $this->plans->getPlan('RP.1A');
+
+        $this->assertSame([1 => 4, 2 => 3], $plan->heatComposition(7));
+        $this->assertSame(
+            [1 => null, 2 => 5, 3 => 1, 4 => 4, 5 => 7, 6 => null],
+            $plan->heatLaneSeeding(1, 7),
+        );
+        $this->assertSame(
+            [1 => null, 2 => 6, 3 => 2, 4 => 3, 5 => null, 6 => null],
+            $plan->heatLaneSeeding(2, 7),
+        );
+    }
+
     public function test_rounds_plan_returns_round_seeding(): void
     {
         $plan = $this->plans->getPlan('ROUNDS_6L');

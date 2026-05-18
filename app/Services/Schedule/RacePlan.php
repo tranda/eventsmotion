@@ -50,7 +50,9 @@ class RacePlan
 
     /**
      * Number of crews in each heat for a given total crew count.
-     * Derived from heat_lane_seeding by counting seeds <= crewCount.
+     * For multi-heat plans, applies the IDBF "earlier heats are fuller" rule
+     * (missing-seed slots get promoted from later heats so the early-heat
+     * roster stays full).
      *
      * @return int[] indexed 1-based by heat number
      */
@@ -70,18 +72,17 @@ class RacePlan
         }
 
         $sizes = [];
-        foreach ($this->data['heat_lane_seeding'] as $heatNum => $lanes) {
-            $sizes[$heatNum] = count(array_filter(
-                $lanes,
-                fn($seed) => $seed !== null && $seed <= $crewCount
-            ));
+        foreach ($this->resolveHeatPlacements($crewCount) as $heatNum => $lanes) {
+            $sizes[$heatNum] = count(array_filter($lanes, fn($s) => $s !== null));
         }
         return $sizes;
     }
 
     /**
      * Lane → seed-number map for a given heat, filtered to the active crew count.
-     * Lanes assigned to a seed > crewCount become null (empty).
+     * Lanes assigned to a seed > crewCount become null (empty). For multi-heat
+     * plans, applies the IDBF "earlier heats are fuller" rebalance — see
+     * resolveHeatPlacements() for the algorithm.
      *
      * @return array<int, int|null>
      */
@@ -89,27 +90,138 @@ class RacePlan
     {
         $this->ensureSupports($crewCount);
 
-        $key = $this->isRoundsPlan() ? 'round_lane_seeding' : 'heat_lane_seeding';
-        if (!isset($this->data[$key][$heatNum])) {
-            throw new InvalidArgumentException("Plan {$this->code} has no heat/round {$heatNum}");
+        if ($this->isRoundsPlan()) {
+            if (!isset($this->data['round_lane_seeding'][$heatNum])) {
+                throw new InvalidArgumentException("Plan {$this->code} has no round {$heatNum}");
+            }
+            $lanes = $this->data['round_lane_seeding'][$heatNum];
+            $laneCount = $this->laneCount();
+            if ($crewCount < $laneCount) {
+                return $this->compactCentreOut($laneCount, $crewCount, $heatNum);
+            }
+            return array_map(
+                fn($seed) => ($seed !== null && $seed <= $crewCount) ? $seed : null,
+                $lanes
+            );
         }
 
-        $lanes = $this->data[$key][$heatNum];
-        $laneCount = $this->laneCount();
-
-        // When crewCount < laneCount, the IDBF rotation can leave centre lanes
-        // empty (a seed > crewCount lands in the middle). Per IDBF "fastest in
-        // centre" rule, gaps should be on the outside, so we override with a
-        // centre-out compact allocation. Sacrifices per-round rotation for
-        // partial counts, but that's preferable to centre gaps.
-        if ($crewCount < $laneCount) {
-            return $this->compactCentreOut($laneCount, $crewCount, $heatNum);
+        if (!isset($this->data['heat_lane_seeding'][$heatNum])) {
+            throw new InvalidArgumentException("Plan {$this->code} has no heat {$heatNum}");
         }
 
-        return array_map(
-            fn($seed) => ($seed !== null && $seed <= $crewCount) ? $seed : null,
-            $lanes
-        );
+        $placements = $this->resolveHeatPlacements($crewCount);
+        return $placements[$heatNum];
+    }
+
+    /**
+     * Returns [heatNum => [lane => seed|null]] after applying IDBF heat
+     * rebalancing for partial crew counts.
+     *
+     * Algorithm:
+     *   1. Drop missing seeds at their original lanes (table-defined positions).
+     *   2. Compute target sizes — distribute crewCount across heats so earlier
+     *      heats hold the extras (ceil for first heats, floor for last).
+     *   3. While any earlier heat is below target and any later heat is above:
+     *      - Promote the highest seed (lowest-priority crew) from the later heat
+     *        into the vacant lane in the earlier heat that originally held the
+     *        highest seed (preserves "fastest in centre" — the promoted crew
+     *        takes the most-outside slot in the receiving heat).
+     *
+     * For RP.3A-style plans where the IDBF table already distributes missing
+     * seeds across later heats, this is a no-op. For RP.1 / RP.1A / RP.2
+     * with non-max crew counts, it corrects the off-by-heat imbalance.
+     *
+     * @return array<int, array<int, int|null>>
+     */
+    private function resolveHeatPlacements(int $crewCount): array
+    {
+        $rawHeats = $this->data['heat_lane_seeding'];
+
+        // Step 1 — drop missing seeds.
+        $heats = [];
+        foreach ($rawHeats as $heatNum => $lanes) {
+            $heats[$heatNum] = array_map(
+                fn($s) => ($s !== null && $s <= $crewCount) ? $s : null,
+                $lanes
+            );
+        }
+
+        // Step 2 — target sizes (earlier heats fuller).
+        $heatNums = array_keys($rawHeats);
+        $heatCount = count($heatNums);
+        $base = intdiv($crewCount, $heatCount);
+        $extra = $crewCount % $heatCount;
+        $targets = [];
+        foreach ($heatNums as $i => $heatNum) {
+            $targets[$heatNum] = $base + ($i < $extra ? 1 : 0);
+        }
+
+        // Step 3 — rebalance.
+        // Safety cap: at most one promotion per "missing" seed.
+        $maxIterations = $heatCount * $this->laneCount();
+        for ($iter = 0; $iter < $maxIterations; $iter++) {
+            // Find earliest under-target heat.
+            $earlier = null;
+            foreach ($heats as $heatNum => $lanes) {
+                $present = count(array_filter($lanes, fn($s) => $s !== null));
+                if ($present < $targets[$heatNum]) {
+                    $earlier = $heatNum;
+                    break;
+                }
+            }
+            if ($earlier === null) break;
+
+            // Find latest over-target heat that comes after $earlier.
+            $later = null;
+            foreach (array_reverse($heats, true) as $heatNum => $lanes) {
+                if ($heatNum <= $earlier) continue;
+                $present = count(array_filter($lanes, fn($s) => $s !== null));
+                if ($present > $targets[$heatNum]) {
+                    $later = $heatNum;
+                    break;
+                }
+            }
+            if ($later === null) break;
+
+            // Take the highest seed in $later (lowest-priority crew).
+            $promotedLane = null;
+            $promotedSeed = -1;
+            foreach ($heats[$later] as $lane => $seed) {
+                if ($seed !== null && $seed > $promotedSeed) {
+                    $promotedSeed = $seed;
+                    $promotedLane = $lane;
+                }
+            }
+            $heats[$later][$promotedLane] = null;
+
+            // Place into the vacant lane in $earlier whose original seed was
+            // highest — that's the "outside" slot per IDBF centre-fastest rule.
+            $targetLane = null;
+            $highestOriginal = -1;
+            foreach ($heats[$earlier] as $lane => $seed) {
+                if ($seed !== null) continue;
+                $originalSeed = $rawHeats[$earlier][$lane] ?? null;
+                if ($originalSeed !== null && $originalSeed > $highestOriginal) {
+                    $highestOriginal = $originalSeed;
+                    $targetLane = $lane;
+                }
+            }
+            // Fallback: first vacant lane (shouldn't fire unless the plan has
+            // no non-null original seed in any vacant slot — e.g. RP.1A with
+            // structurally-null edge lanes).
+            if ($targetLane === null) {
+                foreach ($heats[$earlier] as $lane => $seed) {
+                    if ($seed === null && ($rawHeats[$earlier][$lane] ?? null) !== null) {
+                        $targetLane = $lane;
+                        break;
+                    }
+                }
+            }
+            if ($targetLane === null) break;
+            $heats[$earlier][$targetLane] = $promotedSeed;
+        }
+
+        return $heats;
     }
 
     /**
