@@ -29,6 +29,7 @@ class CrewRegistrationController extends BaseController
             'csv' => 'required|string|max:1048576', // up to 1 MiB
             'dry_run' => 'sometimes|boolean',
             'sync' => 'sometimes|boolean',
+            'competition' => 'sometimes|nullable|string|max:64',
             'team_mappings' => 'sometimes|array',
             'team_mappings.*.csv_team_name' => 'required_with:team_mappings|string',
             'team_mappings.*.csv_club_name' => 'required_with:team_mappings|string',
@@ -42,6 +43,7 @@ class CrewRegistrationController extends BaseController
                 (bool) ($data['dry_run'] ?? false),
                 (bool) ($data['sync'] ?? false),
                 $data['team_mappings'] ?? [],
+                (string) ($data['competition'] ?? ''),
             );
         } catch (\Throwable $e) {
             \Log::error('Crew registration import failed', [

@@ -37,11 +37,18 @@ class CrewRegistrationImporter
      *                        are in-scope of the CSV). Destructive.
      */
     /**
-     * @param array $teamMappings array of {csv_team_name, csv_club_name, team_id}
-     *                            — overrides name-based lookup. Lets the
-     *                            operator point a CSV row at an existing team
-     *                            whose name differs slightly (typo, alt
-     *                            spelling) without creating a duplicate.
+     * @param array  $teamMappings array of {csv_team_name, csv_club_name, team_id}
+     *                             — overrides name-based lookup. Lets the
+     *                             operator point a CSV row at an existing team
+     *                             whose name differs slightly (typo, alt
+     *                             spelling) without creating a duplicate.
+     * @param string $competition  free-text competition label (e.g. "Club",
+     *                             "Corporate", "Highschool"). Stamped on every
+     *                             auto-created discipline and used in the
+     *                             discipline lookup key, so the same
+     *                             boat/age/gender/distance under a different
+     *                             competition is treated as a separate
+     *                             discipline. Empty = competition-less.
      */
     public function importForEvent(
         Event $event,
@@ -49,7 +56,9 @@ class CrewRegistrationImporter
         bool $dryRun,
         bool $sync = false,
         array $teamMappings = [],
+        string $competition = '',
     ): array {
+        $competition = trim($competition);
         $sections = $this->parseCsv($csv);
 
         // Lookup keyed by lowercased trimmed "team|club" so we can short-circuit
@@ -81,6 +90,11 @@ class CrewRegistrationImporter
         DB::beginTransaction();
         try {
             // Pre-load existing disciplines keyed by normalized signature.
+            // Competition is part of the key so the same boat/age/gender/dist
+            // under a different competition resolves to a different
+            // discipline. We still pre-load *every* discipline (any
+            // competition) — only same-competition matches reuse, others get
+            // created.
             $disciplinesByKey = [];
             foreach ($event->disciplines()->get() as $d) {
                 $disciplinesByKey[$this->disciplineKey(
@@ -88,6 +102,7 @@ class CrewRegistrationImporter
                     $d->age_group,
                     $d->gender_group,
                     (int) $d->distance,
+                    (string) ($d->competition ?? ''),
                 )] = $d;
             }
 
@@ -123,7 +138,7 @@ class CrewRegistrationImporter
                     if (!$age || !$gender || !$distance) {
                         continue;
                     }
-                    $key = $this->disciplineKey($boat, $age, $gender, (int) $distance);
+                    $key = $this->disciplineKey($boat, $age, $gender, (int) $distance, $competition);
                     $d = $disciplinesByKey[$key] ?? null;
                     if ($d) {
                         $colToDiscipline[$colIdx] = $d;
@@ -180,13 +195,14 @@ class CrewRegistrationImporter
                         // Use cached resolution, or auto-create on first mark.
                         $discipline = $colToDiscipline[$colIdx] ?? null;
                         if (!$discipline) {
-                            $key = $this->disciplineKey($boat, $age, $gender, (int) $distance);
+                            $key = $this->disciplineKey($boat, $age, $gender, (int) $distance, $competition);
                             $discipline = Discipline::create([
                                 'event_id' => $event->id,
                                 'boat_group' => $boat,
                                 'age_group' => $age,
                                 'gender_group' => $gender,
                                 'distance' => (int) $distance,
+                                'competition' => $competition === '' ? null : $competition,
                                 'status' => 'active',
                             ]);
                             $disciplinesByKey[$key] = $discipline;
@@ -448,9 +464,9 @@ class CrewRegistrationImporter
         return $digits === '' ? null : $digits;
     }
 
-    private function disciplineKey(string $boat, string $age, string $gender, int $distance): string
+    private function disciplineKey(string $boat, string $age, string $gender, int $distance, string $competition = ''): string
     {
-        return strtolower("$boat|$age|$gender|$distance");
+        return strtolower("$boat|$age|$gender|$distance|$competition");
     }
 
     private function isRegisteredMark(string $cell): bool
