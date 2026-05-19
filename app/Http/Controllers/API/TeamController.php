@@ -126,7 +126,19 @@ class TeamController extends BaseController
         $teamclub->team_id = $team->id;
         $teamclub->save();
 
-        return response()->json($team);
+        // TEMP DEBUG: echo back what the server actually saw and resolved so we
+        // can verify which branch fired without needing log access.
+        return response()->json([
+            'team' => $team,
+            '_debug' => [
+                'user_id' => $user->id,
+                'user_access_level' => $user->access_level,
+                'user_access_level_cast' => $accessLevel,
+                'user_club_id' => $user->club_id,
+                'requested_club_id' => $requestedClubId,
+                'final_club_id' => $clubId,
+            ],
+        ]);
     }
 
     public function deleteTeam($id)
