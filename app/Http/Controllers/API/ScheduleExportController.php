@@ -8,8 +8,7 @@ use App\Models\RaceResult;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
-use OpenSpout\Common\Entity\Row;
-use OpenSpout\Writer\XLSX\Writer as XlsxWriter;
+use OpenSpout\Writer\Common\Creator\WriterEntityFactory;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -80,9 +79,11 @@ class ScheduleExportController extends BaseController
 
         $tmp = tempnam(sys_get_temp_dir(), 'sched_') . '.xlsx';
         try {
-            $writer = new XlsxWriter();
+            // openspout 3.x: use the legacy factory; constructing the Writer
+            // directly requires internal services.
+            $writer = WriterEntityFactory::createXLSXWriter();
             $writer->openToFile($tmp);
-            $writer->addRow(Row::fromValues($headers));
+            $writer->addRow(WriterEntityFactory::createRowFromArray($headers));
 
             foreach ($entries as $e) {
                 $t = $e->race_time ? Carbon::parse($e->race_time) : null;
@@ -97,7 +98,7 @@ class ScheduleExportController extends BaseController
                         $e->label ?? '',
                     ];
                     for ($i = 1; $i <= $laneCount; $i++) $row[] = '';
-                    $writer->addRow(Row::fromValues($row));
+                    $writer->addRow(WriterEntityFactory::createRowFromArray($row));
                     continue;
                 }
 
@@ -125,7 +126,7 @@ class ScheduleExportController extends BaseController
                 for ($i = 1; $i <= $laneCount; $i++) {
                     $row[] = $byLane[$i]?->crew?->team?->name ?? '';
                 }
-                $writer->addRow(Row::fromValues($row));
+                $writer->addRow(WriterEntityFactory::createRowFromArray($row));
             }
 
             $writer->close();
