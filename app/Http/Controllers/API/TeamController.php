@@ -89,21 +89,36 @@ class TeamController extends BaseController
     public function createTeam(Request $request)
     {
         $user = $request->user(); // Retrieve the authenticated user
-        // $competition = Event::where('id', 1)->first();
 
-        // Allow club_id to be passed in request, otherwise use user's club_id
-        // This allows referees, event managers, and admins to create teams for any club
-        $clubId = $request->input('club_id');
+        // Allow club_id to be passed in request, otherwise use user's club_id.
+        // This lets referees, event managers, and admins create teams for any club.
+        $requestedClubId = $request->input('club_id');
+        $accessLevel = (int) $user->access_level;
 
-        // If club_id not provided or user has access_level 0 (club manager), use user's club_id
-        if (!$clubId || $user->access_level == 0) {
+        \Log::info('createTeam request', [
+            'user_id' => $user->id,
+            'user_access_level' => $user->access_level,
+            'user_club_id' => $user->club_id,
+            'requested_club_id' => $requestedClubId,
+        ]);
+
+        // Strict comparison: only fall back to user's own club when the user is
+        // a club manager (access_level === 0). For everyone else, honor the
+        // requested club_id whenever it is provided (and non-zero).
+        $clubId = $requestedClubId;
+        if ($accessLevel === 0 || $clubId === null || $clubId === '' || (int) $clubId === 0) {
             $clubId = $user->club_id;
+        } else {
+            $clubId = (int) $clubId;
         }
+
+        \Log::info('createTeam resolved club', [
+            'final_club_id' => $clubId,
+        ]);
 
         $team = new Team();
         $team->name = $request->input('name');
         $team->club_id = $clubId;
-
         $team->save();
 
         $teamclub = new TeamClubs();
