@@ -239,17 +239,23 @@ class RacePlan
             return $assignment;
         }
 
-        // Build lane order centre-out: e.g. 4 lanes → [3,2,4,1]; 6 → [4,3,5,2,6,1].
-        $centre = (int) ceil(($laneCount + 1) / 2);
+        // Build lane order centre-out per IDBF: for even lane counts the
+        // "centre" lane is the LOWER of the two middle lanes (lane 2 of 4,
+        // lane 3 of 6, lane 4 of 8), then we alternate RIGHT, LEFT, …
+        // 4 lanes → [2, 3, 1, 4]; 6 → [3, 4, 2, 5, 1, 6]; 8 → [4, 5, 3, 6, 2, 7, 1, 8].
+        // This matches the seed-→-lane mapping used by RP.1 / ROUNDS_4L /
+        // ROUNDS_6L / RP.5A in the IDBF tables, so partial-crew rounds keep
+        // the empty lane on the outside (highest lane number), never lane 1.
+        $centre = intdiv($laneCount + 1, 2);
         $order = [$centre];
         for ($d = 1; $d < $laneCount; $d++) {
-            $left = $centre - $d;
             $right = $centre + $d;
-            if ($left >= 1) {
-                $order[] = $left;
-            }
+            $left = $centre - $d;
             if ($right <= $laneCount) {
                 $order[] = $right;
+            }
+            if ($left >= 1) {
+                $order[] = $left;
             }
         }
 

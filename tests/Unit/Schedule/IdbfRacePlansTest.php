@@ -239,6 +239,19 @@ class IdbfRacePlansTest extends TestCase
         $this->assertSame([1 => 4, 2 => 4, 3 => 4], $plan->heatComposition(4));
     }
 
+    public function test_rounds_4l_with_3_crews_leaves_outside_lane_empty_not_lane_1(): void
+    {
+        // ROUNDS_4L with 3 crews: lane 4 (outside) should be empty every round,
+        // never lane 1. Best seed sits centre (lane 2), then lane 3, then lane 1.
+        // Per-round rotation rotates which seed gets the centre slot, but the
+        // empty lane stays on the outside.
+        $plan = $this->plans->getPlan('ROUNDS_4L');
+
+        $this->assertSame([1 => 3, 2 => 1, 3 => 2, 4 => null], $plan->heatLaneSeeding(1, 3));
+        $this->assertSame([1 => 1, 2 => 2, 3 => 3, 4 => null], $plan->heatLaneSeeding(2, 3));
+        $this->assertSame([1 => 2, 2 => 3, 3 => 1, 4 => null], $plan->heatLaneSeeding(3, 3));
+    }
+
     public function test_grand_final_seeding_present_for_progression_plans(): void
     {
         $rp3a = $this->plans->getPlan('RP.3A');
