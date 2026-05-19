@@ -49,18 +49,66 @@ class ScheduleGeneratorService
 
         $defaultRounds = (int) ($event->default_rounds ?? 3);
         DB::transaction(function () use ($event, $disciplines, $orderedBlocks, $defaultRounds, $result) {
+            // Snapshot existing race times by (discipline_id, stage) so they
+            // survive the delete+recreate cycle. Manual drag-reorders and
+            // break-shifts stay put even on a full event regenerate; only
+            // truly new stages (new discipline or changed plan) get freshly
+            // placed by placeRacesIntoBlocks.
+            $preservedTimes = $this->snapshotRaceTimes($event);
+
             $this->deleteScheduledRaces($event);
 
-            // Create rows per discipline, then place into blocks.
             foreach ($disciplines as $discipline) {
                 $this->generateForDiscipline($discipline, $event->lane_count, $defaultRounds, $result);
             }
 
+            $this->restoreRaceTimes($event, $preservedTimes);
             $this->placeRacesIntoBlocks($event, $orderedBlocks, $result);
             $this->renumberRaces($event);
         });
 
         return $result;
+    }
+
+    /**
+     * Snapshot current race times keyed by "{discipline_id}|{stage}". Used by
+     * generate() to preserve manual drag-reorders across a full regenerate
+     * — see comment in generate() for details.
+     *
+     * @return array<string, \Carbon\Carbon>
+     */
+    private function snapshotRaceTimes(Event $event): array
+    {
+        return RaceResult::whereHas('discipline', fn($q) => $q->where('event_id', $event->id))
+            ->where('status', 'SCHEDULED')
+            ->whereNotNull('race_time')
+            ->get()
+            ->mapWithKeys(fn($r) => [
+                "{$r->discipline_id}|{$r->stage}" => Carbon::parse($r->race_time),
+            ])
+            ->toArray();
+    }
+
+    /**
+     * Apply a snapshot from snapshotRaceTimes() to freshly-created races
+     * (race_time = null) where (discipline_id, stage) matches.
+     */
+    private function restoreRaceTimes(Event $event, array $preservedTimes): void
+    {
+        if (empty($preservedTimes)) {
+            return;
+        }
+        $races = RaceResult::whereHas('discipline', fn($q) => $q->where('event_id', $event->id))
+            ->where('status', 'SCHEDULED')
+            ->whereNull('race_time')
+            ->get();
+        foreach ($races as $race) {
+            $key = "{$race->discipline_id}|{$race->stage}";
+            if (isset($preservedTimes[$key])) {
+                $race->race_time = $preservedTimes[$key];
+                $race->save();
+            }
+        }
     }
 
     /**
