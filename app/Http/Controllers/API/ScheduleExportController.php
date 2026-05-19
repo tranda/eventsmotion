@@ -8,6 +8,8 @@ use App\Models\RaceResult;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use OpenSpout\Common\Entity\Row;
+use OpenSpout\Writer\XLSX\Writer as XlsxWriter;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -28,8 +30,8 @@ class ScheduleExportController extends BaseController
         }
 
         $format = strtolower((string) $request->query('format', 'csv'));
-        if (!in_array($format, ['txt', 'csv', 'pdf'], true)) {
-            return $this->sendError('Unsupported format. Use txt, csv or pdf.', [], 422);
+        if (!in_array($format, ['txt', 'csv', 'pdf', 'xlsx'], true)) {
+            return $this->sendError('Unsupported format. Use txt, csv, pdf or xlsx.', [], 422);
         }
 
         $day = $request->query('day'); // YYYY-MM-DD or null
@@ -51,9 +53,86 @@ class ScheduleExportController extends BaseController
             $filename = "schedule_{$slug}{$dayTag}.pdf";
             return $this->streamed($body, $filename, 'application/pdf');
         }
+        if ($format === 'xlsx') {
+            $body = $this->buildXlsx($entries, $laneCount);
+            $filename = "schedule_{$slug}{$dayTag}.xlsx";
+            return $this->streamed(
+                $body,
+                $filename,
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            );
+        }
         $body = $this->buildTxt($event, $entries, $day, $laneCount);
         $filename = "schedule_{$slug}{$dayTag}.txt";
         return $this->streamed($body, $filename, 'text/plain; charset=UTF-8');
+    }
+
+    private function buildXlsx($entries, int $laneCount): string
+    {
+        $headers = [
+            'race_number', 'date', 'time', 'entry_type',
+            'boat', 'age', 'gender', 'distance',
+            'competition', 'stage', 'label',
+        ];
+        for ($i = 1; $i <= $laneCount; $i++) {
+            $headers[] = "lane{$i}_team";
+        }
+
+        $tmp = tempnam(sys_get_temp_dir(), 'sched_') . '.xlsx';
+        try {
+            $writer = new XlsxWriter();
+            $writer->openToFile($tmp);
+            $writer->addRow(Row::fromValues($headers));
+
+            foreach ($entries as $e) {
+                $t = $e->race_time ? Carbon::parse($e->race_time) : null;
+                if ($e->isBreak()) {
+                    $row = [
+                        '',
+                        $t?->toDateString() ?? '',
+                        $t?->format('H:i') ?? '',
+                        'break',
+                        '', '', '', '', '',
+                        $e->stage ?? '',
+                        $e->label ?? '',
+                    ];
+                    for ($i = 1; $i <= $laneCount; $i++) $row[] = '';
+                    $writer->addRow(Row::fromValues($row));
+                    continue;
+                }
+
+                $d = $e->discipline;
+                $row = [
+                    $e->race_number ?? '',
+                    $t?->toDateString() ?? '',
+                    $t?->format('H:i') ?? '',
+                    'race',
+                    $d?->boat_group ?? '',
+                    $d?->age_group ?? '',
+                    $d?->gender_group ?? '',
+                    $d?->distance ?? '',
+                    $d?->competition ?? '',
+                    $e->stage ?? '',
+                    '',
+                ];
+
+                $byLane = [];
+                foreach ($e->crewResults ?? [] as $cr) {
+                    if ($cr->lane !== null) {
+                        $byLane[(int) $cr->lane] = $cr;
+                    }
+                }
+                for ($i = 1; $i <= $laneCount; $i++) {
+                    $row[] = $byLane[$i]?->crew?->team?->name ?? '';
+                }
+                $writer->addRow(Row::fromValues($row));
+            }
+
+            $writer->close();
+            return file_get_contents($tmp);
+        } finally {
+            if (is_file($tmp)) @unlink($tmp);
+        }
     }
 
     private function buildPdf(Event $event, $entries, ?string $day, int $laneCount): string
@@ -95,17 +174,7 @@ class ScheduleExportController extends BaseController
             $lanes = [];
             for ($i = 1; $i <= $laneCount; $i++) {
                 $cr = $byLane[$i] ?? null;
-                $team = $cr?->crew?->team;
-                if (!$team) {
-                    $lanes[$i] = null;
-                    continue;
-                }
-                $club = $team->club?->name;
-                $country = $team->club?->country;
-                $label = $team->name ?? '?';
-                if ($club) $label .= " — {$club}";
-                if ($country) $label .= " ({$country})";
-                $lanes[$i] = $label;
+                $lanes[$i] = $cr?->crew?->team?->name;
             }
 
             $byDate[$dateStr][] = [
@@ -172,8 +241,6 @@ class ScheduleExportController extends BaseController
         ];
         for ($i = 1; $i <= $laneCount; $i++) {
             $headers[] = "lane{$i}_team";
-            $headers[] = "lane{$i}_club";
-            $headers[] = "lane{$i}_country";
         }
 
         $rows = [$headers];
@@ -190,8 +257,6 @@ class ScheduleExportController extends BaseController
                     $e->label ?? '',
                 ];
                 for ($i = 1; $i <= $laneCount; $i++) {
-                    $row[] = '';
-                    $row[] = '';
                     $row[] = '';
                 }
                 $rows[] = $row;
@@ -221,10 +286,7 @@ class ScheduleExportController extends BaseController
             }
             for ($i = 1; $i <= $laneCount; $i++) {
                 $cr = $byLane[$i] ?? null;
-                $team = $cr?->crew?->team;
-                $row[] = $team?->name ?? '';
-                $row[] = $team?->club?->name ?? '';
-                $row[] = $team?->club?->country ?? '';
+                $row[] = $cr?->crew?->team?->name ?? '';
             }
             $rows[] = $row;
         }
@@ -303,16 +365,8 @@ class ScheduleExportController extends BaseController
 
             for ($i = 1; $i <= $laneCount; $i++) {
                 $cr = $byLane[$i] ?? null;
-                $team = $cr?->crew?->team;
-                $teamLine = '-';
-                if ($team) {
-                    $club = $team->club?->name;
-                    $country = $team->club?->country;
-                    $teamLine = $team->name ?? '?';
-                    if ($club) $teamLine .= " — {$club}";
-                    if ($country) $teamLine .= " ({$country})";
-                }
-                $lines[] = sprintf('       Lane %d: %s', $i, $teamLine);
+                $teamName = $cr?->crew?->team?->name ?? '-';
+                $lines[] = sprintf('       Lane %d: %s', $i, $teamName);
             }
             $lines[] = '';
         }
