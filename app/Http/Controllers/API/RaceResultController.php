@@ -43,20 +43,31 @@ class RaceResultController extends BaseController
 
             $applyPublishedFilter = fn($query) => $includeDrafts ? $query : $query->published();
 
+            // Filter out races for inactive disciplines — break rows have no
+            // discipline so they're always included.
+            $activeDisciplineFilter = fn($query) => $query->where(function ($q) {
+                $q->whereDoesntHave('discipline')
+                  ->orWhereHas('discipline', fn($d) => $d->where('status', 'active'));
+            });
+
             // Get all races for the event regardless of completion status
             try {
-                $raceResults = $applyPublishedFilter(
-                    RaceResult::with(['discipline', 'crewResults.crew.team.club'])
-                        ->forEvent($eventId)
+                $raceResults = $activeDisciplineFilter(
+                    $applyPublishedFilter(
+                        RaceResult::with(['discipline', 'crewResults.crew.team.club'])
+                            ->forEvent($eventId)
+                    )
                 )
                     ->orderBy('race_number', 'asc')
                     ->get();
             } catch (\Exception $e) {
                 \Log::error("Error loading race results with crews: " . $e->getMessage());
                 // Fallback to basic loading
-                $raceResults = $applyPublishedFilter(
-                    RaceResult::with(['discipline', 'crewResults.crew'])
-                        ->forEvent($eventId)
+                $raceResults = $activeDisciplineFilter(
+                    $applyPublishedFilter(
+                        RaceResult::with(['discipline', 'crewResults.crew'])
+                            ->forEvent($eventId)
+                    )
                 )
                     ->orderBy('race_number', 'asc')
                     ->get();

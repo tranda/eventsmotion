@@ -43,7 +43,15 @@ class ScheduleGeneratorService
             throw new InvalidArgumentException('Event days have no schedule blocks configured.');
         }
 
-        $disciplines = $event->disciplines()->with(['crews', 'progression'])->orderBy('id')->get();
+        // Inactive disciplines are excluded — generator won't create races for
+        // them, and the Grid filters them out too. Operator can flip them back
+        // to active (Plan & Seeds) or bump min_crews_per_race in Setup to
+        // bring them back into the schedule.
+        $disciplines = $event->disciplines()
+            ->where('status', 'active')
+            ->with(['crews', 'progression'])
+            ->orderBy('id')
+            ->get();
 
         $result = new GenerationResult();
 
@@ -120,6 +128,11 @@ class ScheduleGeneratorService
         $event = $discipline->event;
         if (!$event) {
             throw new InvalidArgumentException("Discipline {$discipline->id} has no event");
+        }
+        if (($discipline->status ?? 'active') !== 'active') {
+            throw new InvalidArgumentException(
+                "Cannot regenerate {$discipline->getDisplayName()}: discipline is inactive."
+            );
         }
         $hasNonScheduled = RaceResult::where('discipline_id', $discipline->id)
             ->where('status', '!=', 'SCHEDULED')
