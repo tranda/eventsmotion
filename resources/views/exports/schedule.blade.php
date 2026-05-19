@@ -115,10 +115,10 @@
 
             <table class="races">
                 <colgroup>
-                    <col style="width: 4%;">
-                    <col style="width: 8%;">
-                    <col>
-                    <col style="width: 16%;">
+                    <col width="4%">
+                    <col width="8%">
+                    <col width="72%">
+                    <col width="16%">
                 </colgroup>
                 <thead>
                     <tr>
