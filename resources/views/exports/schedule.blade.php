@@ -5,9 +5,8 @@
     <title>{{ $title }}</title>
     <style>
         /* DejaVu Sans is bundled with dompdf and supports Latin Extended-A
-           (ž, č, š, đ, ć, ö, é, …) plus most European diacritics out of the
-           box. Forcing it everywhere avoids the default Helvetica fallback
-           which loses non-ASCII glyphs. */
+           (ž, č, š, đ, ć, ö, é, …) plus most European diacritics out of
+           the box. */
         body {
             font-family: 'DejaVu Sans', sans-serif;
             font-size: 9pt;
@@ -33,6 +32,7 @@
         table.races {
             width: 100%;
             border-collapse: collapse;
+            table-layout: fixed; /* equal-width lane columns */
             margin-bottom: 8px;
         }
         table.races th {
@@ -43,38 +43,27 @@
             padding: 4px 6px;
             border-bottom: 1px solid #BBDEFB;
             font-weight: 600;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         table.races td {
             border-bottom: 1px solid #E5E7EB;
             padding: 4px 6px;
             vertical-align: top;
+            overflow: hidden;
+            word-wrap: break-word;
         }
-        td.num {
-            font-weight: bold;
-            width: 28pt;
-        }
-        td.time {
-            width: 40pt;
-        }
-        td.discipline {
-            font-weight: 600;
-        }
-        td.stage {
-            color: #374151;
-            width: 70pt;
-        }
-        td.lanes {
-            color: #4B5563;
+        td.num, th.num { width: 26pt; font-weight: bold; }
+        td.time, th.time { width: 38pt; }
+        td.discipline, th.discipline { width: 130pt; font-weight: 600; }
+        td.stage, th.stage { width: 70pt; color: #374151; }
+        td.lane, th.lane {
             font-size: 8pt;
+            color: #1F2937;
+            text-align: center;
         }
-        td.lanes .lane {
-            display: inline-block;
-            margin-right: 8px;
-            white-space: nowrap;
-        }
-        td.lanes .lane-num {
-            color: #6B7280;
-            font-weight: 600;
+        th.lane {
+            background: #E3F2FD;
         }
         tr.brk td {
             background: #FFF8E1;
@@ -109,11 +98,13 @@
         <table class="races">
             <thead>
                 <tr>
-                    <th>#</th>
-                    <th>Time</th>
-                    <th>Discipline</th>
-                    <th>Stage</th>
-                    <th>Lanes</th>
+                    <th class="num">#</th>
+                    <th class="time">Time</th>
+                    <th class="discipline">Discipline</th>
+                    <th class="stage">Stage</th>
+                    @for($i = 1; $i <= $laneCount; $i++)
+                        <th class="lane">L{{ $i }}</th>
+                    @endfor
                 </tr>
             </thead>
             <tbody>
@@ -122,12 +113,11 @@
                         <tr class="brk">
                             <td class="num"></td>
                             <td class="time">{{ $e['time'] }}</td>
-                            <td class="discipline" colspan="2">
+                            <td colspan="{{ 2 + $laneCount }}">
                                 ☕ {{ $e['label'] }}
                                 @if($e['duration_label']) ({{ $e['duration_label'] }}) @endif
                                 @if(!$e['shift_subsequent']) <em>[parallel]</em> @endif
                             </td>
-                            <td class="lanes"></td>
                         </tr>
                     @else
                         <tr>
@@ -140,14 +130,9 @@
                                 @endif
                             </td>
                             <td class="stage">{{ $e['stage'] }}</td>
-                            <td class="lanes">
-                                @foreach($e['lanes'] as $lane => $crew)
-                                    <span class="lane">
-                                        <span class="lane-num">L{{ $lane }}:</span>
-                                        {{ $crew ?: '—' }}
-                                    </span>
-                                @endforeach
-                            </td>
+                            @for($i = 1; $i <= $laneCount; $i++)
+                                <td class="lane">{{ $e['lanes'][$i] ?? '—' }}</td>
+                            @endfor
                         </tr>
                     @endif
                 @endforeach

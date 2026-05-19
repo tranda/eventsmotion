@@ -193,6 +193,7 @@ class ScheduleExportController extends BaseController
             'dayFilter' => $day,
             'generatedAt' => now()->format('Y-m-d H:i'),
             'byDate' => $byDate,
+            'laneCount' => $laneCount,
         ])->setPaper('a4', 'landscape');
 
         return $pdf->output();
