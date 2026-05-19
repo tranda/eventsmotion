@@ -24,16 +24,22 @@ class ScheduleGenerationController extends BaseController
         private LaneSeeder $laneSeeder,
     ) {}
 
-    /** POST /api/events/{id}/schedule/generate */
-    public function generate($eventId)
+    /**
+     * POST /api/events/{id}/schedule/generate
+     * Body: { clean?: bool } — clean=true wipes any preserved drag-edited
+     * ordering and rebuilds the schedule from scratch.
+     */
+    public function generate(\Illuminate\Http\Request $request, $eventId)
     {
         $event = Event::find($eventId);
         if (!$event) {
             return $this->sendError('Event not found', [], 404);
         }
 
+        $clean = $request->boolean('clean');
+
         try {
-            $result = $this->generator->generate($event);
+            $result = $this->generator->generate($event, clean: $clean);
         } catch (InvalidArgumentException $e) {
             return $this->sendError($e->getMessage(), [], 422);
         } catch (Throwable $e) {

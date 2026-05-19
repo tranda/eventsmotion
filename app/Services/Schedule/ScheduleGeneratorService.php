@@ -29,9 +29,13 @@ class ScheduleGeneratorService
     /**
      * Regenerate the full schedule for an event.
      *
+     * @param bool $clean When true, skips the snapshot/restore step — every
+     *                    race is freshly placed from block.start, ignoring
+     *                    any prior drag-edited ordering. Use to "start over"
+     *                    when the schedule has gone sideways.
      * @throws InvalidArgumentException if no event days/blocks exist
      */
-    public function generate(Event $event): GenerationResult
+    public function generate(Event $event, bool $clean = false): GenerationResult
     {
         $eventDays = $event->eventDays()->with('blocks')->get();
         if ($eventDays->isEmpty()) {
@@ -56,13 +60,13 @@ class ScheduleGeneratorService
         $result = new GenerationResult();
 
         $defaultRounds = (int) ($event->default_rounds ?? 3);
-        DB::transaction(function () use ($event, $disciplines, $orderedBlocks, $defaultRounds, $result) {
+        DB::transaction(function () use ($event, $disciplines, $orderedBlocks, $defaultRounds, $result, $clean) {
             // Snapshot existing race times by (discipline_id, stage) so they
-            // survive the delete+recreate cycle. Manual drag-reorders and
-            // break-shifts stay put even on a full event regenerate; only
-            // truly new stages (new discipline or changed plan) get freshly
-            // placed by placeRacesIntoBlocks.
-            $preservedTimes = $this->snapshotRaceTimes($event);
+            // survive the delete+recreate cycle. Manual drag-reorders stay
+            // put on a full event regenerate; only truly new stages (new
+            // discipline or changed plan) get freshly placed.
+            // Skipped in clean mode — every race rebuilds from block.start.
+            $preservedTimes = $clean ? [] : $this->snapshotRaceTimes($event);
 
             $this->deleteScheduledRaces($event);
 
@@ -70,7 +74,9 @@ class ScheduleGeneratorService
                 $this->generateForDiscipline($discipline, $event->lane_count, $defaultRounds, $result);
             }
 
-            $this->restoreRaceTimes($event, $preservedTimes);
+            if (!$clean) {
+                $this->restoreRaceTimes($event, $preservedTimes);
+            }
             $this->placeRacesIntoBlocks($event, $orderedBlocks, $result);
             $this->recomputeAllBlockTimes($event);
         });
