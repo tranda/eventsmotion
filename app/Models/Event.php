@@ -27,6 +27,7 @@ class Event extends Model
         'lane_count',
         'default_rounds',
         'min_crews_per_race',
+        'color_map',
         'schedule_status',
         'schedule_published_at',
     ];
@@ -42,6 +43,7 @@ class Event extends Model
         'lane_count' => 'integer',
         'default_rounds' => 'integer',
         'min_crews_per_race' => 'integer',
+        'color_map' => 'array',
     ];
 
     public function disciplines()

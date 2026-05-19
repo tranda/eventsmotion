@@ -36,6 +36,7 @@ class ScheduleConfigController extends BaseController
                 'lane_count' => $event->lane_count,
                 'default_rounds' => $event->default_rounds ?? 3,
                 'min_crews_per_race' => $event->min_crews_per_race ?? 3,
+                'color_map' => $event->color_map,
                 'schedule_status' => $event->schedule_status,
                 'schedule_published_at' => $event->schedule_published_at,
                 'days' => $event->eventDays->map(fn(EventDay $day) => [
@@ -75,12 +76,15 @@ class ScheduleConfigController extends BaseController
             'lane_count' => 'sometimes|integer|in:3,4,6,8,9',
             'default_rounds' => 'sometimes|integer|min:1|max:10',
             'min_crews_per_race' => 'sometimes|integer|min:1|max:20',
+            // Free-form JSON map { category => { value => hex_color } }.
+            // Validated shallowly here; the frontend owns the schema.
+            'color_map' => 'sometimes|nullable|array',
         ]);
 
         $event->update($validated);
 
         return $this->sendResponse(
-            $event->only(['id', 'lane_count', 'default_rounds', 'min_crews_per_race', 'schedule_status']),
+            $event->only(['id', 'lane_count', 'default_rounds', 'min_crews_per_race', 'color_map', 'schedule_status']),
             'Schedule config updated.',
         );
     }
