@@ -106,6 +106,39 @@ return [
         ],
     ],
 
+    // Non-IDBF variant. Same heat structure as RP.1 (4 crews + 3 crews) but
+    // a single repechage instead of two, and one extra crew skips the rep via
+    // "best result" alongside the two heat winners. Listed after RP.1 so
+    // pickPlan() keeps choosing the standard plan; this only appears in the
+    // override dropdown for operators who want a shorter day.
+    //
+    // Final lineup (4 crews): 2 heat winners + best heat non-winner + rep winner.
+    // Total races: 2 heats + 1 rep + 1 final = 4 (vs RP.1's 5).
+    'RP.1_COMPACT' => [
+        'lane_count' => 4,
+        'crew_count_range' => [7, 7],
+        'stages' => ['Heat 1', 'Heat 2', 'Repechage 1', 'Grand Final'],
+        // Same heat-lane numbers as RP.1; the resolveHeatPlacements() rebalance
+        // turns the 7-crew case into H1=4 (lanes 5,1,4,7), H2=3 (lanes 6,2,3).
+        'heat_lane_seeding' => [
+            1 => [1 => 5, 2 => 1, 3 => 4, 4 => 8],
+            2 => [1 => 6, 2 => 2, 3 => 3, 4 => 7],
+        ],
+        // 4 crews into the rep, centre-out by overall heat ranking.
+        'repechage_lane_seeding' => [
+            1 => [1 => '6th in hts', 2 => '4th in hts', 3 => '5th in hts', 4 => '7th in hts'],
+        ],
+        'grand_final_lane_seeding' => [
+            1 => '3rd in hts', 2 => '1st in hts', 3 => '2nd in hts', 4 => '1st in reps',
+        ],
+        'advancement' => [
+            'Variant of RP.1 — not in the IDBF Race Plans document.',
+            '2 heat winners + next fastest overall → Grand Final (3 crews).',
+            'Remaining 4 crews → repechage.',
+            'Winner of repechage → Grand Final (4 crews total).',
+        ],
+    ],
+
     'RP.2' => [
         'lane_count' => 4,
         'crew_count_range' => [9, 12],

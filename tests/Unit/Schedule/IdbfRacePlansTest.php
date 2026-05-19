@@ -163,6 +163,30 @@ class IdbfRacePlansTest extends TestCase
         $this->assertSame([1 => null, 2 => 6, 3 => 2, 4 => 3, 5 => 7, 6 => null], $plan->heatLaneSeeding(2, 8));
     }
 
+    public function test_rp_1_compact_is_not_auto_picked_for_seven_crews(): void
+    {
+        // The compact variant exists in the catalogue but ranks below RP.1
+        // so the standard plan stays the default.
+        $picked = $this->plans->pickPlan(4, 7);
+        $this->assertSame('RP.1', $picked->code);
+
+        $options = $this->plans->planOptions(4, 7);
+        $this->assertContains('RP.1', $options);
+        $this->assertContains('RP.1_COMPACT', $options);
+    }
+
+    public function test_rp_1_compact_seven_crew_layout(): void
+    {
+        $plan = $this->plans->getPlan('RP.1_COMPACT');
+
+        $this->assertSame(['Heat 1', 'Heat 2', 'Repechage 1', 'Grand Final'], $plan->stages());
+        // Heats inherit RP.1's lane table, so the rebalance for 7 crews
+        // promotes seed 7 from H2L4 into H1L4.
+        $this->assertSame([1 => 4, 2 => 3], $plan->heatComposition(7));
+        $this->assertSame([1 => 5, 2 => 1, 3 => 4, 4 => 7], $plan->heatLaneSeeding(1, 7));
+        $this->assertSame([1 => 6, 2 => 2, 3 => 3, 4 => null], $plan->heatLaneSeeding(2, 7));
+    }
+
     public function test_rp_1_promotes_seed_into_earlier_heat_for_seven_crews(): void
     {
         // RP.1 page 6: with 7 crews the PDF specifies H1=4, H2=3.
