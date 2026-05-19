@@ -113,19 +113,13 @@
                 </div>
             </div>
 
-            <table class="races">
-                <colgroup>
-                    <col width="4%">
-                    <col width="8%">
-                    <col width="72%">
-                    <col width="16%">
-                </colgroup>
+            <table class="races" width="100%">
                 <thead>
                     <tr>
-                        <th class="num">#</th>
-                        <th class="time">Time</th>
+                        <th class="num" width="22">#</th>
+                        <th class="time" width="34">Time</th>
                         <th class="discipline">Discipline</th>
-                        <th class="stage">Stage</th>
+                        <th class="stage" width="70">Stage</th>
                     </tr>
                 </thead>
                 <tbody>
