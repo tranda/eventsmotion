@@ -138,18 +138,51 @@ class ScheduleExportController extends BaseController
 
     private function buildPdf(Event $event, $entries, ?string $day, int $laneCount): string
     {
-        // Group entries by date for the template. Each race is split into
-        // category tokens so the blade can render them as coloured badges
-        // (matching the Grid's visual style).
+        // PDF is grouped by block (one block per page). Each race is split
+        // into category tokens so the blade can render them as coloured
+        // badges (matching the Grid's visual style).
         $colorMap = is_array($event->color_map) ? $event->color_map : [];
-        $byDate = [];
+
+        // Load every block with its day so we can pin each entry to one.
+        $orderedBlocks = [];
+        foreach ($event->eventDays()->with('blocks')->get()->sortBy('sort_order') as $eday) {
+            foreach ($eday->blocks->sortBy('sort_order') as $blk) {
+                $orderedBlocks[] = ['day' => $eday, 'block' => $blk];
+            }
+        }
+
+        $byBlock = [];
+        $orphanKey = '__orphan__';
         foreach ($entries as $e) {
             $t = $e->race_time ? Carbon::parse($e->race_time) : null;
             $dateStr = $t?->toDateString() ?? '?';
 
+            // Pin this entry to a block. For races we use filter matching;
+            // for breaks we use "latest block on same day whose start ≤
+            // break time". Falls back to an "Unassigned" bucket if nothing
+            // matches (e.g. event has no blocks configured).
+            $bd = $e->isBreak()
+                ? $this->findBlockForBreakByTime($t, $orderedBlocks)
+                : $this->findBlockForRace($e, $orderedBlocks);
+            if ($bd === null) {
+                $blockKey = $orphanKey;
+                $blockMeta = ['name' => 'Unassigned', 'date' => $dateStr, 'start_time' => '', 'gap_seconds' => 0];
+            } else {
+                $blockKey = $bd['block']->id;
+                $blockMeta = [
+                    'name' => $bd['block']->name ?: 'Block',
+                    'date' => $dateStr,
+                    'start_time' => $bd['block']->start_time,
+                    'gap_seconds' => (int) $bd['block']->gap_seconds,
+                ];
+            }
+            if (!isset($byBlock[$blockKey])) {
+                $byBlock[$blockKey] = ['meta' => $blockMeta, 'entries' => []];
+            }
+
             if ($e->isBreak()) {
                 $duration = (int) ($e->duration_seconds ?? 0);
-                $byDate[$dateStr][] = [
+                $byBlock[$blockKey]['entries'][] = [
                     'is_break' => true,
                     'time' => $t?->format('H:i') ?? '—',
                     'label' => $e->label ?? $e->stage ?? 'Break',
@@ -178,7 +211,7 @@ class ScheduleExportController extends BaseController
                 : '#E5E7EB';
             $stageFg = $this->contrastingFg($stageBg);
 
-            $byDate[$dateStr][] = [
+            $byBlock[$blockKey]['entries'][] = [
                 'is_break' => false,
                 'race_number' => $e->race_number,
                 'time' => $t?->format('H:i') ?? '—',
@@ -190,13 +223,12 @@ class ScheduleExportController extends BaseController
             ];
         }
 
-        // PDF shows race rows only — no lanes / crews (operators use the
-        // Grid or CSV/XLSX/TXT for the lane breakdown).
+        // PDF shows race rows only — one block per page.
         $pdf = Pdf::loadView('exports.schedule', [
             'title' => ($event->name ?? "Event #{$event->id}") . ' — Race Schedule',
             'dayFilter' => $day,
             'generatedAt' => now()->format('Y-m-d H:i'),
-            'byDate' => $byDate,
+            'byBlock' => $byBlock,
         ])->setPaper('a4', 'portrait');
 
         return $pdf->output();
@@ -376,6 +408,78 @@ class ScheduleExportController extends BaseController
         }
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * Pick the first block in order that matches the race's discipline
+     * filters. Returns ['day' => EventDay, 'block' => ScheduleBlock] or null.
+     */
+    private function findBlockForRace(RaceResult $race, array $orderedBlocks): ?array
+    {
+        $d = $race->discipline;
+        if (!$d) return null;
+        foreach ($orderedBlocks as $bd) {
+            if ($this->raceMatchesBlock($d, $race->stage, $bd['block'])) {
+                return $bd;
+            }
+        }
+        return null;
+    }
+
+    /** Latest block on the same day whose start_time ≤ time. */
+    private function findBlockForBreakByTime(?Carbon $t, array $orderedBlocks): ?array
+    {
+        if (!$t) return null;
+        $date = $t->toDateString();
+        $candidate = null;
+        foreach ($orderedBlocks as $bd) {
+            $dayDate = $bd['day']->date instanceof Carbon
+                ? $bd['day']->date->toDateString()
+                : (string) $bd['day']->date;
+            if ($dayDate !== $date) continue;
+            $bs = Carbon::parse($dayDate . ' ' . $bd['block']->start_time);
+            if ($bs->lte($t)) {
+                $candidate = $bd;
+            }
+        }
+        return $candidate;
+    }
+
+    private function raceMatchesBlock($discipline, ?string $stage, $block): bool
+    {
+        $gf = $block->gender_filter;
+        if (is_array($gf) && !empty($gf)) {
+            $map = ['M' => 'Open', 'W' => 'Women', 'X' => 'Mixed'];
+            $needles = array_map(fn($v) => $map[strtoupper((string) $v)] ?? $v, $gf);
+            if (!in_array($discipline->gender_group, $needles, true)) return false;
+        }
+        $df = $block->distance_filter;
+        if (is_array($df) && !empty($df)) {
+            $needles = array_values(array_filter(
+                array_map(fn($v) => preg_replace('/\D/', '', (string) $v), $df),
+                fn($v) => $v !== ''
+            ));
+            if (!in_array((string) $discipline->distance, $needles, true)) return false;
+        }
+        $sf = $block->stage_filter;
+        if (is_array($sf) && !empty($sf)) {
+            $s = strtolower((string) $stage);
+            $matched = false;
+            foreach ($sf as $needle) {
+                if (str_contains($s, strtolower((string) $needle))) {
+                    $matched = true;
+                    break;
+                }
+            }
+            if (!$matched) return false;
+        }
+        $cf = $block->competition_filter;
+        if (is_array($cf) && !empty($cf)) {
+            $c = strtolower((string) ($discipline->competition ?? ''));
+            $needles = array_map(fn($v) => strtolower((string) $v), $cf);
+            if (!in_array($c, $needles, true)) return false;
+        }
+        return true;
     }
 
     /**

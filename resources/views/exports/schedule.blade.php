@@ -11,6 +11,12 @@
             color: #1F2937;
             margin: 0;
         }
+        .block-section {
+            page-break-after: always;
+        }
+        .block-section:last-child {
+            page-break-after: auto;
+        }
         h1 {
             font-size: 14pt;
             margin: 0 0 4px 0;
@@ -20,12 +26,19 @@
             font-size: 8pt;
             margin-bottom: 12px;
         }
-        h2.day {
-            font-size: 11pt;
+        .block-header {
             background: #1565C0;
             color: white;
-            padding: 4px 8px;
-            margin: 12px 0 4px 0;
+            padding: 6px 10px;
+            margin: 0 0 6px 0;
+        }
+        .block-header .name {
+            font-size: 12pt;
+            font-weight: 700;
+        }
+        .block-header .sub {
+            font-size: 8pt;
+            opacity: 0.9;
         }
         table.races {
             width: 100%;
@@ -79,55 +92,70 @@
     </style>
 </head>
 <body>
-    <h1>{{ $title }}</h1>
-    <div class="meta">
-        @if($dayFilter) Day: {{ $dayFilter }} · @else All days · @endif
-        Generated: {{ $generatedAt }}
-    </div>
+    @foreach($byBlock as $blockKey => $section)
+        <div class="block-section">
+            <h1>{{ $title }}</h1>
+            <div class="meta">
+                @if($dayFilter) Day: {{ $dayFilter }} · @else All days · @endif
+                Generated: {{ $generatedAt }}
+            </div>
 
-    @foreach($byDate as $date => $entries)
-        <h2 class="day">{{ $date }} &nbsp;·&nbsp; {{ count($entries) }} entries</h2>
-        <table class="races">
-            <thead>
-                <tr>
-                    <th class="num">#</th>
-                    <th class="time">Time</th>
-                    <th class="discipline">Discipline</th>
-                    <th class="stage">Stage</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach($entries as $e)
-                    @if($e['is_break'])
-                        <tr class="brk">
-                            <td class="num"></td>
-                            <td class="time">{{ $e['time'] }}</td>
-                            <td colspan="2">
-                                ☕ {{ $e['label'] }}
-                                @if($e['duration_label']) ({{ $e['duration_label'] }}) @endif
-                                @if(!$e['shift_subsequent']) <em>[parallel]</em> @endif
-                            </td>
-                        </tr>
-                    @else
-                        <tr>
-                            <td class="num">{{ $e['race_number'] ?: '—' }}</td>
-                            <td class="time">{{ $e['time'] }}</td>
-                            <td class="discipline">
-                                @foreach($e['tokens'] as $tok)
-                                    <span class="badge" style="background: {{ $tok['bg'] }}; color: {{ $tok['fg'] }};">{{ $tok['val'] }}</span>
-                                @endforeach
-                                @if($e['competition'])
-                                    <span class="competition">{{ $e['competition'] }}</span>
-                                @endif
-                            </td>
-                            <td class="stage">
-                                <span class="badge" style="background: {{ $e['stage_bg'] }}; color: {{ $e['stage_fg'] }};">{{ $e['stage'] }}</span>
-                            </td>
-                        </tr>
+            <div class="block-header">
+                <div class="name">{{ $section['meta']['name'] }}</div>
+                <div class="sub">
+                    {{ $section['meta']['date'] }}
+                    @if($section['meta']['start_time'])
+                        &nbsp;·&nbsp; starts {{ $section['meta']['start_time'] }}
                     @endif
-                @endforeach
-            </tbody>
-        </table>
+                    @if($section['meta']['gap_seconds'] > 0)
+                        &nbsp;·&nbsp; gap {{ intval($section['meta']['gap_seconds'] / 60) }} min
+                    @endif
+                    &nbsp;·&nbsp; {{ count($section['entries']) }} entries
+                </div>
+            </div>
+
+            <table class="races">
+                <thead>
+                    <tr>
+                        <th class="num">#</th>
+                        <th class="time">Time</th>
+                        <th class="discipline">Discipline</th>
+                        <th class="stage">Stage</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach($section['entries'] as $e)
+                        @if($e['is_break'])
+                            <tr class="brk">
+                                <td class="num"></td>
+                                <td class="time">{{ $e['time'] }}</td>
+                                <td colspan="2">
+                                    ☕ {{ $e['label'] }}
+                                    @if($e['duration_label']) ({{ $e['duration_label'] }}) @endif
+                                    @if(!$e['shift_subsequent']) <em>[parallel]</em> @endif
+                                </td>
+                            </tr>
+                        @else
+                            <tr>
+                                <td class="num">{{ $e['race_number'] ?: '—' }}</td>
+                                <td class="time">{{ $e['time'] }}</td>
+                                <td class="discipline">
+                                    @foreach($e['tokens'] as $tok)
+                                        <span class="badge" style="background: {{ $tok['bg'] }}; color: {{ $tok['fg'] }};">{{ $tok['val'] }}</span>
+                                    @endforeach
+                                    @if($e['competition'])
+                                        <span class="competition">{{ $e['competition'] }}</span>
+                                    @endif
+                                </td>
+                                <td class="stage">
+                                    <span class="badge" style="background: {{ $e['stage_bg'] }}; color: {{ $e['stage_fg'] }};">{{ $e['stage'] }}</span>
+                                </td>
+                            </tr>
+                        @endif
+                    @endforeach
+                </tbody>
+            </table>
+        </div>
     @endforeach
 </body>
 </html>
