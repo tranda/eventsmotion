@@ -62,8 +62,8 @@
             font-size: 9pt;
             word-wrap: break-word;
         }
-        th.num, td.num { width: 22pt; font-weight: bold; }
-        th.time, td.time { width: 34pt; }
+        th.num, td.num { width: 16pt; font-weight: bold; }
+        th.time, td.time { width: 28pt; }
         th.stage, td.stage { width: 68pt; text-align: right; }
         td.discipline { white-space: nowrap; }
         tr.brk td {
