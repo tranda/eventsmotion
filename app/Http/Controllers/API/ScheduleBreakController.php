@@ -82,6 +82,8 @@ class ScheduleBreakController extends BaseController
             return $break;
         });
 
+        $this->generator->recomputeAllBlockTimes($event);
+
         return $this->sendResponse($break->fresh()->toArray(), 'Break created.');
     }
 
@@ -171,6 +173,11 @@ class ScheduleBreakController extends BaseController
             ]);
         });
 
+        $event = $break->event_id ? Event::find($break->event_id) : null;
+        if ($event) {
+            $this->generator->recomputeAllBlockTimes($event);
+        }
+
         return $this->sendResponse($break->fresh()->toArray(), 'Break updated.');
     }
 
@@ -182,6 +189,7 @@ class ScheduleBreakController extends BaseController
             return $this->sendError('Break not found', [], 404);
         }
 
+        $eventIdForRecompute = $break->event_id;
         DB::transaction(function () use ($break) {
             $time = $break->race_time ? Carbon::parse($break->race_time) : null;
             $duration = (int) ($break->duration_seconds ?? 0);
@@ -197,6 +205,11 @@ class ScheduleBreakController extends BaseController
                 );
             }
         });
+
+        $event = $eventIdForRecompute ? Event::find($eventIdForRecompute) : null;
+        if ($event) {
+            $this->generator->recomputeAllBlockTimes($event);
+        }
 
         return $this->sendResponse([], 'Break deleted.');
     }

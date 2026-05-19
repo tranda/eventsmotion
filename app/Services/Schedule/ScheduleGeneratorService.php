@@ -72,7 +72,7 @@ class ScheduleGeneratorService
 
             $this->restoreRaceTimes($event, $preservedTimes);
             $this->placeRacesIntoBlocks($event, $orderedBlocks, $result);
-            $this->renumberRaces($event);
+            $this->recomputeAllBlockTimes($event);
         });
 
         return $result;
@@ -164,7 +164,7 @@ class ScheduleGeneratorService
                 $result,
             );
             $this->placeRacesIntoBlocks($event, $orderedBlocks, $result);
-            $this->renumberRaces($event);
+            $this->recomputeAllBlockTimes($event);
         });
 
         return $result;
@@ -547,6 +547,132 @@ class ScheduleGeneratorService
     public function renumberEventRaces(Event $event): void
     {
         $this->renumberRaces($event);
+    }
+
+    /**
+     * Normalize race_time of every race + break in the event by walking each
+     * block's entries in current race_time order and reassigning:
+     *   first race → block.start
+     *   next race  → previous + gap_seconds
+     *   shift-break → previous + duration_seconds
+     *   parallel break → doesn't advance the cursor
+     *
+     * Then renumbers races. Called after generate / regenerate / reorder /
+     * break-edit so the schedule always starts at block.start with no gaps
+     * and every race lands on a canonical slot.
+     */
+    public function recomputeAllBlockTimes(Event $event): void
+    {
+        $eventDays = $event->eventDays()->with('blocks')->get();
+        $orderedBlocks = $this->orderedBlocks($eventDays);
+        if (empty($orderedBlocks)) {
+            return;
+        }
+
+        // Bucket every race into the block it matches by filter, every break
+        // into the latest block on the same day that starts at-or-before its
+        // current race_time. Entries without a bucket keep their current time
+        // (typically orphans — operator should fix manually).
+        $bucketsByBlockId = [];
+
+        $races = RaceResult::whereHas('discipline', fn($q) => $q->where('event_id', $event->id))
+            ->where('status', 'SCHEDULED')
+            ->whereNotNull('race_time')
+            ->with('discipline')
+            ->get();
+        foreach ($races as $race) {
+            $block = $this->findMatchingBlock($race, $orderedBlocks);
+            if ($block) {
+                $bucketsByBlockId[$block->id][] = $race;
+            }
+        }
+
+        $breaks = RaceResult::where('event_id', $event->id)
+            ->where('entry_type', 'break')
+            ->where('status', 'SCHEDULED')
+            ->whereNotNull('race_time')
+            ->get();
+        foreach ($breaks as $brk) {
+            $block = $this->findBlockForBreak($brk, $orderedBlocks);
+            if ($block) {
+                $bucketsByBlockId[$block->id][] = $brk;
+            }
+        }
+
+        $blocksById = [];
+        foreach ($orderedBlocks as $block) {
+            $blocksById[$block->id] = $block;
+        }
+
+        DB::transaction(function () use ($bucketsByBlockId, $blocksById) {
+            foreach ($bucketsByBlockId as $blockId => $entries) {
+                $this->recomputeBlockEntryTimes($blocksById[$blockId], $entries);
+            }
+        });
+
+        $this->renumberRaces($event);
+    }
+
+    private function recomputeBlockEntryTimes($block, array $entries): void
+    {
+        usort($entries, function ($a, $b) {
+            $ta = $a->race_time;
+            $tb = $b->race_time;
+            if ($ta === null && $tb === null) {
+                return ($a->id ?? 0) <=> ($b->id ?? 0);
+            }
+            if ($ta === null) return 1;
+            if ($tb === null) return -1;
+            $cmp = strcmp((string) $ta, (string) $tb);
+            return $cmp !== 0 ? $cmp : (($a->id ?? 0) <=> ($b->id ?? 0));
+        });
+
+        $dateStr = $block->eventDay->date instanceof Carbon
+            ? $block->eventDay->date->toDateString()
+            : (string) $block->eventDay->date;
+        $next = Carbon::parse($dateStr . ' ' . $block->start_time);
+
+        foreach ($entries as $entry) {
+            $entry->race_time = $next;
+            $entry->save();
+
+            if ($entry->isBreak()) {
+                if ($entry->shift_subsequent) {
+                    $next = $next->copy()->addSeconds((int) ($entry->duration_seconds ?? 0));
+                }
+                // Parallel break: cursor doesn't advance — next race uses the
+                // same slot logic as if the break wasn't there.
+            } else {
+                $next = $next->copy()->addSeconds((int) $block->gap_seconds);
+            }
+        }
+    }
+
+    /**
+     * Latest block on the same day that starts at-or-before the break's
+     * current race_time. Null if the break sits before any block start.
+     */
+    private function findBlockForBreak(RaceResult $break, array $orderedBlocks)
+    {
+        if (!$break->race_time) {
+            return null;
+        }
+        $breakTime = Carbon::parse($break->race_time);
+        $breakDate = $breakTime->toDateString();
+        $candidate = null;
+        foreach ($orderedBlocks as $block) {
+            $day = $block->eventDay;
+            if (!$day) continue;
+            $blockDate = $day->date instanceof Carbon
+                ? $day->date->toDateString()
+                : (string) $day->date;
+            if ($blockDate !== $breakDate) continue;
+            $blockStart = Carbon::parse($blockDate . ' ' . $block->start_time);
+            if ($blockStart->lte($breakTime)) {
+                $candidate = $block;
+            }
+        }
+        return $candidate;
     }
 
     /**

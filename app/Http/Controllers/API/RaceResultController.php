@@ -1761,11 +1761,15 @@ class RaceResultController extends BaseController
                 }
             });
 
+            // The client-side slot-swap gives a working ordering via race_time;
+            // recompute normalizes every block to start = block.start_time and
+            // accounts for breaks deterministically. Order survives, times
+            // become canonical.
             $generator = app(\App\Services\Schedule\ScheduleGeneratorService::class);
             foreach ($eventIds as $eventId) {
                 $event = \App\Models\Event::find($eventId);
                 if ($event) {
-                    $generator->renumberEventRaces($event);
+                    $generator->recomputeAllBlockTimes($event);
                 }
             }
 
