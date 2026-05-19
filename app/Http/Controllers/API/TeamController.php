@@ -95,26 +95,15 @@ class TeamController extends BaseController
         $requestedClubId = $request->input('club_id');
         $accessLevel = (int) $user->access_level;
 
-        \Log::info('createTeam request', [
-            'user_id' => $user->id,
-            'user_access_level' => $user->access_level,
-            'user_club_id' => $user->club_id,
-            'requested_club_id' => $requestedClubId,
-        ]);
-
-        // Strict comparison: only fall back to user's own club when the user is
-        // a club manager (access_level === 0). For everyone else, honor the
-        // requested club_id whenever it is provided (and non-zero).
+        // Only fall back to the user's own club when they are a club manager
+        // (access_level === 0) or no club_id was supplied. Strict checks so
+        // a null access_level doesn't coerce to 0 and silently override.
         $clubId = $requestedClubId;
         if ($accessLevel === 0 || $clubId === null || $clubId === '' || (int) $clubId === 0) {
             $clubId = $user->club_id;
         } else {
             $clubId = (int) $clubId;
         }
-
-        \Log::info('createTeam resolved club', [
-            'final_club_id' => $clubId,
-        ]);
 
         $team = new Team();
         $team->name = $request->input('name');
@@ -126,19 +115,7 @@ class TeamController extends BaseController
         $teamclub->team_id = $team->id;
         $teamclub->save();
 
-        // TEMP DEBUG: echo back what the server actually saw and resolved so we
-        // can verify which branch fired without needing log access.
-        return response()->json([
-            'team' => $team,
-            '_debug' => [
-                'user_id' => $user->id,
-                'user_access_level' => $user->access_level,
-                'user_access_level_cast' => $accessLevel,
-                'user_club_id' => $user->club_id,
-                'requested_club_id' => $requestedClubId,
-                'final_club_id' => $clubId,
-            ],
-        ]);
+        return response()->json($team);
     }
 
     public function deleteTeam($id)
