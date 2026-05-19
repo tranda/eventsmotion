@@ -138,8 +138,10 @@ class ScheduleExportController extends BaseController
 
     private function buildPdf(Event $event, $entries, ?string $day, int $laneCount): string
     {
-        // Group entries by date for the template; lanes pre-rendered as
-        // (lane => "Team — Club (Country)") for the per-row "Lanes" cell.
+        // Group entries by date for the template. Each race is split into
+        // category tokens so the blade can render them as coloured badges
+        // (matching the Grid's visual style).
+        $colorMap = is_array($event->color_map) ? $event->color_map : [];
         $byDate = [];
         foreach ($entries as $e) {
             $t = $e->race_time ? Carbon::parse($e->race_time) : null;
@@ -158,12 +160,23 @@ class ScheduleExportController extends BaseController
             }
 
             $d = $e->discipline;
-            $discName = trim(implode(' ', array_filter([
-                $d?->boat_group,
-                $d?->age_group,
-                $d?->gender_group,
-                $d?->distance ? "{$d->distance}m" : null,
-            ])));
+            $tokens = [];
+            if (!empty($d?->boat_group))   $tokens[] = ['cat' => 'boat', 'val' => $d->boat_group];
+            if (!empty($d?->age_group))    $tokens[] = ['cat' => 'age', 'val' => $d->age_group];
+            if (!empty($d?->gender_group)) $tokens[] = ['cat' => 'gender', 'val' => $d->gender_group];
+            if (!empty($d?->distance))     $tokens[] = ['cat' => 'distance', 'val' => "{$d->distance}m"];
+            // Resolve colours server-side so the blade stays simple.
+            foreach ($tokens as &$tok) {
+                $tok['bg'] = $this->resolveColor($colorMap, $tok['cat'], $tok['val']);
+                $tok['fg'] = $this->contrastingFg($tok['bg']);
+            }
+            unset($tok);
+
+            $stageType = $this->stageType($e->stage ?? '');
+            $stageBg = $stageType !== ''
+                ? $this->resolveColor($colorMap, 'stage', $stageType)
+                : '#E5E7EB';
+            $stageFg = $this->contrastingFg($stageBg);
 
             $byLane = [];
             foreach ($e->crewResults ?? [] as $cr) {
@@ -182,9 +195,11 @@ class ScheduleExportController extends BaseController
                 'is_break' => false,
                 'race_number' => $e->race_number,
                 'time' => $t?->format('H:i') ?? '—',
-                'discipline' => $discName,
+                'tokens' => $tokens,
                 'competition' => $d?->competition ?? '',
                 'stage' => $e->stage ?? '',
+                'stage_bg' => $stageBg,
+                'stage_fg' => $stageFg,
                 'lanes' => $lanes,
             ];
         }
@@ -195,7 +210,7 @@ class ScheduleExportController extends BaseController
             'generatedAt' => now()->format('Y-m-d H:i'),
             'byDate' => $byDate,
             'laneCount' => $laneCount,
-        ])->setPaper('a4', 'landscape');
+        ])->setPaper('a4', 'portrait');
 
         return $pdf->output();
     }
@@ -374,6 +389,67 @@ class ScheduleExportController extends BaseController
         }
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * Default colour palette mirroring the frontend's RaceColorPalette so
+     * un-overridden values get a sensible chip colour in the PDF.
+     */
+    private const DEFAULT_COLORS = [
+        'boat' => [
+            'Standard' => '#1976D2', 'Small' => '#7B1FA2',
+        ],
+        'age' => [
+            'Junior' => '#388E3C', 'Junior A' => '#66BB6A', 'Junior B' => '#AED581',
+            'U24' => '#00ACC1', 'Premier' => '#D32F2F', 'Senior A' => '#F57C00',
+            'Senior B' => '#FBC02D', 'Senior C' => '#FFA726', 'Senior D' => '#FFCC80',
+            'BCP' => '#5D4037', 'ACP' => '#455A64',
+        ],
+        'gender' => [
+            'Open' => '#1565C0', 'Women' => '#C2185B', 'Mixed' => '#6D4C41',
+        ],
+        'distance' => [
+            '100m' => '#B39DDB', '200m' => '#7E57C2', '250m' => '#26A69A',
+            '500m' => '#42A5F5', '1000m' => '#66BB6A', '2000m' => '#EF6C00',
+        ],
+        'stage' => [
+            'Round' => '#1976D2', 'Heat' => '#388E3C', 'Repechage' => '#F57C00',
+            'Semi' => '#7B1FA2', 'Grand Final' => '#FFC107',
+            'Minor Final' => '#9E9E9E', 'Tail Final' => '#607D8B',
+        ],
+    ];
+
+    private function resolveColor(array $colorMap, string $category, string $value): string
+    {
+        $override = $colorMap[$category][$value] ?? null;
+        if (is_string($override) && preg_match('/^#?[0-9a-fA-F]{6,8}$/', $override)) {
+            return str_starts_with($override, '#') ? $override : "#{$override}";
+        }
+        return self::DEFAULT_COLORS[$category][$value] ?? '#BDBDBD';
+    }
+
+    /** "Round 1" / "Round 2" → "Round"; "Repechage 2" → "Repechage". */
+    private function stageType(string $stage): string
+    {
+        $trimmed = trim($stage);
+        if ($trimmed === '') return '';
+        if (preg_match('/^(.*?)\s+\d+$/', $trimmed, $m)) return $m[1];
+        return $trimmed;
+    }
+
+    /** Black or white text for readable contrast on the given hex background. */
+    private function contrastingFg(string $hex): string
+    {
+        $h = ltrim($hex, '#');
+        if (strlen($h) === 6) {
+            $r = hexdec(substr($h, 0, 2));
+            $g = hexdec(substr($h, 2, 2));
+            $b = hexdec(substr($h, 4, 2));
+            // Relative luminance, simplified.
+            $lum = (0.299 * $r + 0.587 * $g + 0.114 * $b) / 255;
+            return $lum > 0.55 ? '#1F2937' : '#FFFFFF';
+        }
+        return '#FFFFFF';
     }
 
     private function durationLabel(int $seconds): string
