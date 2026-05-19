@@ -62,9 +62,10 @@
             font-size: 9pt;
             word-wrap: break-word;
         }
-        th.num, td.num { width: 20pt; font-weight: bold; }
-        th.time, td.time { width: 32pt; }
-        th.stage, td.stage { width: 100pt; }
+        th.num, td.num { width: 22pt; font-weight: bold; }
+        th.time, td.time { width: 34pt; }
+        th.stage, td.stage { width: 68pt; text-align: right; }
+        td.discipline { white-space: nowrap; }
         tr.brk td {
             background: #FFF8E1;
             font-style: italic;
