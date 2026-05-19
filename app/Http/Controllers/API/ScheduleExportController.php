@@ -178,19 +178,6 @@ class ScheduleExportController extends BaseController
                 : '#E5E7EB';
             $stageFg = $this->contrastingFg($stageBg);
 
-            $byLane = [];
-            foreach ($e->crewResults ?? [] as $cr) {
-                if ($cr->lane !== null) {
-                    $byLane[(int) $cr->lane] = $cr;
-                }
-            }
-
-            $lanes = [];
-            for ($i = 1; $i <= $laneCount; $i++) {
-                $cr = $byLane[$i] ?? null;
-                $lanes[$i] = $cr?->crew?->team?->name;
-            }
-
             $byDate[$dateStr][] = [
                 'is_break' => false,
                 'race_number' => $e->race_number,
@@ -200,16 +187,16 @@ class ScheduleExportController extends BaseController
                 'stage' => $e->stage ?? '',
                 'stage_bg' => $stageBg,
                 'stage_fg' => $stageFg,
-                'lanes' => $lanes,
             ];
         }
 
+        // PDF shows race rows only — no lanes / crews (operators use the
+        // Grid or CSV/XLSX/TXT for the lane breakdown).
         $pdf = Pdf::loadView('exports.schedule', [
             'title' => ($event->name ?? "Event #{$event->id}") . ' — Race Schedule',
             'dayFilter' => $day,
             'generatedAt' => now()->format('Y-m-d H:i'),
             'byDate' => $byDate,
-            'laneCount' => $laneCount,
         ])->setPaper('a4', 'portrait');
 
         return $pdf->output();

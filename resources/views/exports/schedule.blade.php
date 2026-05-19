@@ -4,73 +4,65 @@
     <meta charset="UTF-8">
     <title>{{ $title }}</title>
     <style>
-        /* DejaVu Sans covers Latin Extended (ž, č, š, đ, ć, ö, …) — forced
-           everywhere to avoid Helvetica fallbacks that drop glyphs. */
+        /* DejaVu Sans covers Latin Extended (ž, č, š, đ, ć, ö, …). */
         body {
             font-family: 'DejaVu Sans', sans-serif;
-            font-size: 8pt;
+            font-size: 9pt;
             color: #1F2937;
             margin: 0;
         }
         h1 {
-            font-size: 13pt;
+            font-size: 14pt;
             margin: 0 0 4px 0;
         }
         .meta {
             color: #6B7280;
-            font-size: 7pt;
-            margin-bottom: 10px;
+            font-size: 8pt;
+            margin-bottom: 12px;
         }
         h2.day {
-            font-size: 10pt;
+            font-size: 11pt;
             background: #1565C0;
             color: white;
             padding: 4px 8px;
-            margin: 10px 0 4px 0;
+            margin: 12px 0 4px 0;
         }
         table.races {
             width: 100%;
             border-collapse: collapse;
             table-layout: fixed;
-            margin-bottom: 6px;
+            margin-bottom: 8px;
         }
         table.races th {
             background: #E3F2FD;
             color: #0D47A1;
             text-align: left;
-            font-size: 7pt;
-            padding: 3px 4px;
+            font-size: 8pt;
+            padding: 4px 6px;
             border-bottom: 1px solid #BBDEFB;
             font-weight: 600;
-            overflow: hidden;
-            text-overflow: ellipsis;
         }
         table.races td {
             border-bottom: 1px solid #E5E7EB;
-            padding: 3px 4px;
+            padding: 4px 6px;
             vertical-align: middle;
-            overflow: hidden;
+            font-size: 9pt;
             word-wrap: break-word;
-            font-size: 7.5pt;
         }
-        th.num, td.num { width: 22pt; font-weight: bold; }
-        th.time, td.time { width: 30pt; }
-        th.discipline, td.discipline { /* fills remaining width */ }
-        th.stage, td.stage { width: 70pt; }
-        th.lane, td.lane { font-size: 7pt; text-align: center; }
-        th.lane { background: #E3F2FD; }
+        th.num, td.num { width: 28pt; font-weight: bold; }
+        th.time, td.time { width: 44pt; }
+        th.stage, td.stage { width: 100pt; }
         tr.brk td {
             background: #FFF8E1;
             font-style: italic;
         }
-        /* Coloured discipline tokens — mirror the Grid */
         .badge {
             display: inline-block;
-            padding: 1px 4px;
+            padding: 1px 5px;
             border-radius: 3px;
-            font-size: 7pt;
+            font-size: 8pt;
             font-weight: 600;
-            margin-right: 2px;
+            margin-right: 3px;
             white-space: nowrap;
         }
         .competition {
@@ -78,11 +70,11 @@
             background: #FFE0B2;
             border: 1px solid #FFB74D;
             color: #5D4037;
-            padding: 0 3px;
+            padding: 0 4px;
             border-radius: 3px;
-            font-size: 6.5pt;
+            font-size: 7pt;
             font-weight: 600;
-            margin-left: 2px;
+            margin-left: 3px;
         }
     </style>
 </head>
@@ -102,9 +94,6 @@
                     <th class="time">Time</th>
                     <th class="discipline">Discipline</th>
                     <th class="stage">Stage</th>
-                    @for($i = 1; $i <= $laneCount; $i++)
-                        <th class="lane">L{{ $i }}</th>
-                    @endfor
                 </tr>
             </thead>
             <tbody>
@@ -113,7 +102,7 @@
                         <tr class="brk">
                             <td class="num"></td>
                             <td class="time">{{ $e['time'] }}</td>
-                            <td colspan="{{ 2 + $laneCount }}">
+                            <td colspan="2">
                                 ☕ {{ $e['label'] }}
                                 @if($e['duration_label']) ({{ $e['duration_label'] }}) @endif
                                 @if(!$e['shift_subsequent']) <em>[parallel]</em> @endif
@@ -134,9 +123,6 @@
                             <td class="stage">
                                 <span class="badge" style="background: {{ $e['stage_bg'] }}; color: {{ $e['stage_fg'] }};">{{ $e['stage'] }}</span>
                             </td>
-                            @for($i = 1; $i <= $laneCount; $i++)
-                                <td class="lane">{{ $e['lanes'][$i] ?? '—' }}</td>
-                            @endfor
                         </tr>
                     @endif
                 @endforeach
