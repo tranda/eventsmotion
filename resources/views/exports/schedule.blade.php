@@ -62,10 +62,8 @@
             font-size: 9pt;
             word-wrap: break-word;
         }
-        th.num, td.num { width: 16pt; font-weight: bold; }
-        th.time, td.time { width: 28pt; }
-        th.stage, td.stage { width: 68pt; text-align: right; }
-        td.discipline { white-space: nowrap; }
+        td.num, th.num { font-weight: bold; text-align: right; }
+        td.stage, th.stage { text-align: right; }
         tr.brk td {
             background: #FFF8E1;
             font-style: italic;
@@ -116,6 +114,12 @@
             </div>
 
             <table class="races">
+                <colgroup>
+                    <col style="width: 4%;">
+                    <col style="width: 8%;">
+                    <col>
+                    <col style="width: 16%;">
+                </colgroup>
                 <thead>
                     <tr>
                         <th class="num">#</th>
