@@ -170,6 +170,7 @@ Route::middleware(['auth:sanctum', 'admin'])->group(function () {
 
     // Generation, regeneration, publish
     Route::post('events/{event}/schedule/generate', [ScheduleGenerationController::class, 'generate']);
+    Route::get('events/{event}/schedule/export', [\App\Http\Controllers\API\ScheduleExportController::class, 'export']);
     Route::post('disciplines/{discipline}/schedule/regenerate', [ScheduleGenerationController::class, 'regenerateDiscipline']);
     Route::post('disciplines/{discipline}/schedule/seed-next-round', [ScheduleGenerationController::class, 'seedNextRound']);
     Route::post('events/{event}/schedule/publish', [ScheduleGenerationController::class, 'publish']);
