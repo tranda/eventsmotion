@@ -15,7 +15,10 @@ return new class extends Migration
     {
         Schema::table('events', function (Blueprint $table) {
             if (!Schema::hasColumn('events', 'color_map')) {
-                $table->json('color_map')->nullable()->after('min_crews_per_race');
+                // longText (with the model's array cast doing JSON encode/decode)
+                // because the production MariaDB doesn't speak the native JSON
+                // type that $table->json() emits.
+                $table->longText('color_map')->nullable()->after('min_crews_per_race');
             }
         });
     }
