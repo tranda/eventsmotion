@@ -314,16 +314,47 @@ class ScheduleGeneratorService
      */
     private function placeRacesIntoBlocks(Event $event, array $orderedBlocks, GenerationResult $result): void
     {
-        $blockRaceCount = [];
+        // Races that already have a race_time set (existing schedule from a
+        // prior generate, plus any manual drag-edits in the Grid) are left
+        // alone. Only race_time = NULL rows — i.e. the ones we just created
+        // in this regenerate pass — get placed.
+        //
+        // For each block, we track the next free time slot. If the block
+        // already holds existing races (from any discipline), the next slot
+        // is max(existing race_time in this block) + gap_seconds. Otherwise
+        // it's block.start_time. This way:
+        //   • Manual drag order is preserved on partial regenerates.
+        //   • New races append after whatever's already in the block.
+        //   • Operator can drag the new races wherever they want afterwards.
 
-        $races = RaceResult::whereHas('discipline', fn($q) => $q->where('event_id', $event->id))
+        $existingRaces = RaceResult::whereHas('discipline', fn($q) => $q->where('event_id', $event->id))
             ->where('status', 'SCHEDULED')
+            ->whereNotNull('race_time')
+            ->get();
+
+        // Block-id → latest race_time currently in that block. Carbon for math.
+        $blockLatestTime = [];
+        foreach ($existingRaces as $race) {
+            $block = $this->findMatchingBlock($race, $orderedBlocks);
+            if (!$block) {
+                continue;
+            }
+            $current = Carbon::parse($race->race_time);
+            $existing = $blockLatestTime[$block->id] ?? null;
+            if ($existing === null || $current->gt($existing)) {
+                $blockLatestTime[$block->id] = $current;
+            }
+        }
+
+        $newRaces = RaceResult::whereHas('discipline', fn($q) => $q->where('event_id', $event->id))
+            ->where('status', 'SCHEDULED')
+            ->whereNull('race_time')
             ->with('discipline')
             ->orderBy('discipline_id')
             ->orderBy('id')
             ->get();
 
-        foreach ($races as $race) {
+        foreach ($newRaces as $race) {
             $block = $this->findMatchingBlock($race, $orderedBlocks);
             if (!$block) {
                 $result->addWarning(
@@ -331,16 +362,21 @@ class ScheduleGeneratorService
                 );
                 continue;
             }
-            $count = $blockRaceCount[$block->id] ?? 0;
 
-            $dateStr = $block->eventDay->date instanceof Carbon
-                ? $block->eventDay->date->toDateString()
-                : (string) $block->eventDay->date;
-            $race->race_time = Carbon::parse($dateStr . ' ' . $block->start_time)
-                ->addSeconds($count * $block->gap_seconds);
+            $latest = $blockLatestTime[$block->id] ?? null;
+            if ($latest === null) {
+                $dateStr = $block->eventDay->date instanceof Carbon
+                    ? $block->eventDay->date->toDateString()
+                    : (string) $block->eventDay->date;
+                $next = Carbon::parse($dateStr . ' ' . $block->start_time);
+            } else {
+                $next = $latest->copy()->addSeconds($block->gap_seconds);
+            }
+
+            $race->race_time = $next;
             $race->save();
 
-            $blockRaceCount[$block->id] = $count + 1;
+            $blockLatestTime[$block->id] = $next;
         }
     }
 
