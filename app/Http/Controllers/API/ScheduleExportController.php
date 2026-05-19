@@ -5,6 +5,7 @@ namespace App\Http\Controllers\API;
 use App\Http\Controllers\API\BaseController as BaseController;
 use App\Models\Event;
 use App\Models\RaceResult;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -27,8 +28,8 @@ class ScheduleExportController extends BaseController
         }
 
         $format = strtolower((string) $request->query('format', 'csv'));
-        if (!in_array($format, ['txt', 'csv'], true)) {
-            return $this->sendError('Unsupported format. Use txt or csv.', [], 422);
+        if (!in_array($format, ['txt', 'csv', 'pdf'], true)) {
+            return $this->sendError('Unsupported format. Use txt, csv or pdf.', [], 422);
         }
 
         $day = $request->query('day'); // YYYY-MM-DD or null
@@ -45,9 +46,87 @@ class ScheduleExportController extends BaseController
             $filename = "schedule_{$slug}{$dayTag}.csv";
             return $this->streamed($body, $filename, 'text/csv; charset=UTF-8');
         }
+        if ($format === 'pdf') {
+            $body = $this->buildPdf($event, $entries, $day, $laneCount);
+            $filename = "schedule_{$slug}{$dayTag}.pdf";
+            return $this->streamed($body, $filename, 'application/pdf');
+        }
         $body = $this->buildTxt($event, $entries, $day, $laneCount);
         $filename = "schedule_{$slug}{$dayTag}.txt";
         return $this->streamed($body, $filename, 'text/plain; charset=UTF-8');
+    }
+
+    private function buildPdf(Event $event, $entries, ?string $day, int $laneCount): string
+    {
+        // Group entries by date for the template; lanes pre-rendered as
+        // (lane => "Team — Club (Country)") for the per-row "Lanes" cell.
+        $byDate = [];
+        foreach ($entries as $e) {
+            $t = $e->race_time ? Carbon::parse($e->race_time) : null;
+            $dateStr = $t?->toDateString() ?? '?';
+
+            if ($e->isBreak()) {
+                $duration = (int) ($e->duration_seconds ?? 0);
+                $byDate[$dateStr][] = [
+                    'is_break' => true,
+                    'time' => $t?->format('H:i') ?? '—',
+                    'label' => $e->label ?? $e->stage ?? 'Break',
+                    'duration_label' => $duration > 0 ? $this->durationLabel($duration) : null,
+                    'shift_subsequent' => (bool) $e->shift_subsequent,
+                ];
+                continue;
+            }
+
+            $d = $e->discipline;
+            $discName = trim(implode(' ', array_filter([
+                $d?->boat_group,
+                $d?->age_group,
+                $d?->gender_group,
+                $d?->distance ? "{$d->distance}m" : null,
+            ])));
+
+            $byLane = [];
+            foreach ($e->crewResults ?? [] as $cr) {
+                if ($cr->lane !== null) {
+                    $byLane[(int) $cr->lane] = $cr;
+                }
+            }
+
+            $lanes = [];
+            for ($i = 1; $i <= $laneCount; $i++) {
+                $cr = $byLane[$i] ?? null;
+                $team = $cr?->crew?->team;
+                if (!$team) {
+                    $lanes[$i] = null;
+                    continue;
+                }
+                $club = $team->club?->name;
+                $country = $team->club?->country;
+                $label = $team->name ?? '?';
+                if ($club) $label .= " — {$club}";
+                if ($country) $label .= " ({$country})";
+                $lanes[$i] = $label;
+            }
+
+            $byDate[$dateStr][] = [
+                'is_break' => false,
+                'race_number' => $e->race_number,
+                'time' => $t?->format('H:i') ?? '—',
+                'discipline' => $discName,
+                'competition' => $d?->competition ?? '',
+                'stage' => $e->stage ?? '',
+                'lanes' => $lanes,
+            ];
+        }
+
+        $pdf = Pdf::loadView('exports.schedule', [
+            'title' => ($event->name ?? "Event #{$event->id}") . ' — Race Schedule',
+            'dayFilter' => $day,
+            'generatedAt' => now()->format('Y-m-d H:i'),
+            'byDate' => $byDate,
+        ])->setPaper('a4', 'landscape');
+
+        return $pdf->output();
     }
 
     private function loadEntries(Event $event, ?string $day)
