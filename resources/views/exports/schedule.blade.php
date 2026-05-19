@@ -49,8 +49,8 @@
             font-size: 9pt;
             word-wrap: break-word;
         }
-        th.num, td.num { width: 28pt; font-weight: bold; }
-        th.time, td.time { width: 44pt; }
+        th.num, td.num { width: 20pt; font-weight: bold; }
+        th.time, td.time { width: 32pt; }
         th.stage, td.stage { width: 100pt; }
         tr.brk td {
             background: #FFF8E1;
