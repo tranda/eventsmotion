@@ -109,6 +109,78 @@ class DisciplineProgressionController extends BaseController
         );
     }
 
+    /**
+     * GET /api/events/{event}/plan-and-seeds
+     * Bulk endpoint for the Plan & Seeds tab: returns active disciplines
+     * with their progression + race-plan options in a single payload, so the
+     * UI doesn't have to fire 2N+1 calls.
+     */
+    public function bulkForEvent($eventId)
+    {
+        $event = \App\Models\Event::with([
+            'disciplines' => function ($q) {
+                $q->where('status', 'active')->orderBy('id');
+            },
+            'disciplines.progression',
+            'disciplines.crews',
+        ])->find($eventId);
+
+        if (!$event) {
+            return $this->sendError('Event not found', [], 404);
+        }
+
+        $laneCount = (int) ($event->lane_count ?? 0);
+        $disciplines = $event->disciplines->map(function ($d) use ($laneCount) {
+            $crewCount = $d->crews->count();
+
+            // Auto-pick (best-fit IDBF plan).
+            $autoPick = null;
+            if ($laneCount && $crewCount >= 2) {
+                try {
+                    $autoPick = $this->plans->pickPlan($laneCount, $crewCount)->code;
+                } catch (OutOfRangeException $e) {
+                    $autoPick = null;
+                }
+            }
+
+            // All valid options + CUSTOM. Mirrors the single-discipline
+            // /race-plan-options endpoint.
+            $options = ($laneCount && $crewCount >= 2)
+                ? $this->plans->planOptions($laneCount, $crewCount)
+                : [];
+            $options[] = 'CUSTOM';
+
+            return [
+                'id' => $d->id,
+                'name' => method_exists($d, 'getDisplayName')
+                    ? $d->getDisplayName()
+                    : (string) ($d->name ?? "Discipline {$d->id}"),
+                'boat_group' => $d->boat_group,
+                'age_group' => $d->age_group,
+                'gender_group' => $d->gender_group,
+                'distance' => $d->distance,
+                'competition' => $d->competition,
+                'status' => $d->status,
+                'progression' => [
+                    'discipline_id' => $d->id,
+                    'crew_count' => $crewCount,
+                    'lane_count' => $laneCount,
+                    'auto_pick_code' => $autoPick,
+                    'override_code' => optional($d->progression)->race_plan_code,
+                    'effective_code' => optional($d->progression)->race_plan_code ?? $autoPick,
+                    'custom_stages' => optional($d->progression)->custom_stages,
+                ],
+                'race_plan_options' => $options,
+            ];
+        })->values();
+
+        return $this->sendResponse([
+            'event_id' => $event->id,
+            'lane_count' => $laneCount,
+            'disciplines' => $disciplines,
+        ], 'Plan & Seeds bulk fetch.');
+    }
+
     /** GET /api/disciplines/{id}/race-plan-options */
     public function options($disciplineId)
     {

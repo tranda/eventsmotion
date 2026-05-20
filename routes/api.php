@@ -161,6 +161,7 @@ Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::delete('schedule-blocks/{block}', [ScheduleConfigController::class, 'destroyBlock']);
 
     // Per-discipline plan override + crew seeds
+    Route::get('events/{event}/plan-and-seeds', [DisciplineProgressionController::class, 'bulkForEvent']);
     Route::get('disciplines/{discipline}/progression', [DisciplineProgressionController::class, 'show']);
     Route::put('disciplines/{discipline}/progression', [DisciplineProgressionController::class, 'update']);
     Route::get('disciplines/{discipline}/race-plan-options', [DisciplineProgressionController::class, 'options']);
