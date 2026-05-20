@@ -86,7 +86,7 @@ class ScheduleExportController extends BaseController
             $writer->addRow(WriterEntityFactory::createRowFromArray($headers));
 
             foreach ($entries as $e) {
-                $t = $e->race_time ? Carbon::parse($e->race_time)->setTimezone('Europe/Belgrade') : null;
+                $t = $e->race_time ? Carbon::parse($e->race_time) : null;
                 if ($e->isBreak()) {
                     $row = [
                         '',
@@ -154,7 +154,7 @@ class ScheduleExportController extends BaseController
         $byBlock = [];
         $orphanKey = '__orphan__';
         foreach ($entries as $e) {
-            $t = $e->race_time ? Carbon::parse($e->race_time)->setTimezone('Europe/Belgrade') : null;
+            $t = $e->race_time ? Carbon::parse($e->race_time) : null;
             $dateStr = $t?->toDateString() ?? '?';
 
             // Pin this entry to a block. For races we use filter matching;
@@ -211,12 +211,20 @@ class ScheduleExportController extends BaseController
                 : '#E5E7EB';
             $stageFg = $this->contrastingFg($stageBg);
 
+            $competition = $d?->competition ?? '';
+            $compColors = $competition !== ''
+                ? $this->competitionColor($competition)
+                : ['bg' => '#FFE0B2', 'fg' => '#5D4037', 'border' => '#FFB74D'];
+
             $byBlock[$blockKey]['entries'][] = [
                 'is_break' => false,
                 'race_number' => $e->race_number,
                 'time' => $t?->format('H:i') ?? '—',
                 'tokens' => $tokens,
-                'competition' => $d?->competition ?? '',
+                'competition' => $competition,
+                'comp_bg' => $compColors['bg'],
+                'comp_fg' => $compColors['fg'],
+                'comp_border' => $compColors['border'],
                 'stage' => $e->stage ?? '',
                 'stage_bg' => $stageBg,
                 'stage_fg' => $stageFg,
@@ -297,7 +305,7 @@ class ScheduleExportController extends BaseController
 
         $rows = [$headers];
         foreach ($entries as $e) {
-            $t = $e->race_time ? Carbon::parse($e->race_time)->setTimezone('Europe/Belgrade') : null;
+            $t = $e->race_time ? Carbon::parse($e->race_time) : null;
             if ($e->isBreak()) {
                 $row = [
                     '',                                       // race_number
@@ -365,7 +373,7 @@ class ScheduleExportController extends BaseController
 
         $lastDate = null;
         foreach ($entries as $e) {
-            $t = $e->race_time ? Carbon::parse($e->race_time)->setTimezone('Europe/Belgrade') : null;
+            $t = $e->race_time ? Carbon::parse($e->race_time) : null;
             $dateStr = $t?->toDateString() ?? '?';
             if ($dateStr !== $lastDate) {
                 $lines[] = '';
@@ -542,6 +550,27 @@ class ScheduleExportController extends BaseController
         if ($trimmed === '') return '';
         if (preg_match('/^(.*?)\s+\d+$/', $trimmed, $m)) return $m[1];
         return $trimmed;
+    }
+
+    /**
+     * Distinct light-tint background per competition string (Club, Corporate,
+     * Highschool, University, …). Stable: same string → same colour every
+     * time, so an event keeps its colour-coding consistent across re-exports.
+     */
+    private function competitionColor(string $name): array
+    {
+        $palette = [
+            ['bg' => '#FFE0B2', 'border' => '#FFB74D', 'fg' => '#5D4037'], // amber
+            ['bg' => '#C5CAE9', 'border' => '#7986CB', 'fg' => '#1A237E'], // indigo
+            ['bg' => '#B2DFDB', 'border' => '#4DB6AC', 'fg' => '#004D40'], // teal
+            ['bg' => '#F8BBD0', 'border' => '#F06292', 'fg' => '#880E4F'], // pink
+            ['bg' => '#DCEDC8', 'border' => '#AED581', 'fg' => '#33691E'], // light green
+            ['bg' => '#D1C4E9', 'border' => '#9575CD', 'fg' => '#311B92'], // deep purple
+            ['bg' => '#FFCDD2', 'border' => '#E57373', 'fg' => '#B71C1C'], // red
+            ['bg' => '#B3E5FC', 'border' => '#4FC3F7', 'fg' => '#01579B'], // light blue
+        ];
+        $idx = abs(crc32(strtolower(trim($name)))) % count($palette);
+        return $palette[$idx];
     }
 
     /** Black or white text for readable contrast on the given hex background. */

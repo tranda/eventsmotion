@@ -79,14 +79,13 @@
         }
         .competition {
             display: inline-block;
-            background: #FFE0B2;
-            border: 1px solid #FFB74D;
-            color: #5D4037;
             padding: 0 4px;
             border-radius: 3px;
             font-size: 7pt;
             font-weight: 600;
             margin-left: 3px;
+            border-style: solid;
+            border-width: 1px;
         }
     </style>
 </head>
@@ -143,7 +142,7 @@
                                         <span class="badge" style="background: {{ $tok['bg'] }}; color: {{ $tok['fg'] }};">{{ $tok['val'] }}</span>
                                     @endforeach
                                     @if($e['competition'])
-                                        <span class="competition">{{ $e['competition'] }}</span>
+                                        <span class="competition" style="background: {{ $e['comp_bg'] }}; color: {{ $e['comp_fg'] }}; border-color: {{ $e['comp_border'] }};">{{ $e['competition'] }}</span>
                                     @endif
                                 </td>
                                 <td class="stage">
