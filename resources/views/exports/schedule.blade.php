@@ -77,6 +77,12 @@
             margin-right: 3px;
             white-space: nowrap;
         }
+        .crews {
+            margin-top: 3px;
+            font-size: 7.5pt;
+            color: #4B5563;
+            line-height: 1.3;
+        }
         .competition {
             display: inline-block;
             padding: 0 4px;
@@ -143,6 +149,9 @@
                                     @endforeach
                                     @if($e['competition'])
                                         <span class="competition" style="background: {{ $e['comp_bg'] }}; color: {{ $e['comp_fg'] }}; border-color: {{ $e['comp_border'] }};">{{ $e['competition'] }}</span>
+                                    @endif
+                                    @if(!empty($e['crew_line']))
+                                        <div class="crews">{{ $e['crew_line'] }}</div>
                                     @endif
                                 </td>
                                 <td class="stage">

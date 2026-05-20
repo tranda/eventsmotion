@@ -34,6 +34,7 @@ class ScheduleExportController extends BaseController
         }
 
         $day = $request->query('day'); // YYYY-MM-DD or null
+        $includeCrews = filter_var($request->query('include_crews'), FILTER_VALIDATE_BOOLEAN);
 
         $entries = $this->loadEntries($event, $day);
 
@@ -43,17 +44,17 @@ class ScheduleExportController extends BaseController
         $dayTag = $day ? "_{$day}" : '';
 
         if ($format === 'csv') {
-            $body = $this->buildCsv($entries, $laneCount);
+            $body = $this->buildCsv($entries, $laneCount, $includeCrews);
             $filename = "schedule_{$slug}{$dayTag}.csv";
             return $this->streamed($body, $filename, 'text/csv; charset=UTF-8');
         }
         if ($format === 'pdf') {
-            $body = $this->buildPdf($event, $entries, $day, $laneCount);
+            $body = $this->buildPdf($event, $entries, $day, $laneCount, $includeCrews);
             $filename = "schedule_{$slug}{$dayTag}.pdf";
             return $this->streamed($body, $filename, 'application/pdf');
         }
         if ($format === 'xlsx') {
-            $body = $this->buildXlsx($entries, $laneCount);
+            $body = $this->buildXlsx($entries, $laneCount, $includeCrews);
             $filename = "schedule_{$slug}{$dayTag}.xlsx";
             return $this->streamed(
                 $body,
@@ -61,20 +62,22 @@ class ScheduleExportController extends BaseController
                 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             );
         }
-        $body = $this->buildTxt($event, $entries, $day, $laneCount);
+        $body = $this->buildTxt($event, $entries, $day, $laneCount, $includeCrews);
         $filename = "schedule_{$slug}{$dayTag}.txt";
         return $this->streamed($body, $filename, 'text/plain; charset=UTF-8');
     }
 
-    private function buildXlsx($entries, int $laneCount): string
+    private function buildXlsx($entries, int $laneCount, bool $includeCrews = true): string
     {
         $headers = [
             'race_number', 'date', 'time', 'entry_type',
             'boat', 'age', 'gender', 'distance',
             'competition', 'stage', 'label',
         ];
-        for ($i = 1; $i <= $laneCount; $i++) {
-            $headers[] = "lane{$i}_team";
+        if ($includeCrews) {
+            for ($i = 1; $i <= $laneCount; $i++) {
+                $headers[] = "lane{$i}_team";
+            }
         }
 
         $tmp = tempnam(sys_get_temp_dir(), 'sched_') . '.xlsx';
@@ -97,7 +100,9 @@ class ScheduleExportController extends BaseController
                         $e->stage ?? '',
                         $e->label ?? '',
                     ];
-                    for ($i = 1; $i <= $laneCount; $i++) $row[] = '';
+                    if ($includeCrews) {
+                        for ($i = 1; $i <= $laneCount; $i++) $row[] = '';
+                    }
                     $writer->addRow(WriterEntityFactory::createRowFromArray($row));
                     continue;
                 }
@@ -117,14 +122,16 @@ class ScheduleExportController extends BaseController
                     '',
                 ];
 
-                $byLane = [];
-                foreach ($e->crewResults ?? [] as $cr) {
-                    if ($cr->lane !== null) {
-                        $byLane[(int) $cr->lane] = $cr;
+                if ($includeCrews) {
+                    $byLane = [];
+                    foreach ($e->crewResults ?? [] as $cr) {
+                        if ($cr->lane !== null) {
+                            $byLane[(int) $cr->lane] = $cr;
+                        }
                     }
-                }
-                for ($i = 1; $i <= $laneCount; $i++) {
-                    $row[] = $byLane[$i]?->crew?->team?->name ?? '';
+                    for ($i = 1; $i <= $laneCount; $i++) {
+                        $row[] = $byLane[$i]?->crew?->team?->name ?? '';
+                    }
                 }
                 $writer->addRow(WriterEntityFactory::createRowFromArray($row));
             }
@@ -136,7 +143,7 @@ class ScheduleExportController extends BaseController
         }
     }
 
-    private function buildPdf(Event $event, $entries, ?string $day, int $laneCount): string
+    private function buildPdf(Event $event, $entries, ?string $day, int $laneCount, bool $includeCrews = false): string
     {
         // PDF is grouped by block (one block per page). Each race is split
         // into category tokens so the blade can render them as coloured
@@ -216,6 +223,21 @@ class ScheduleExportController extends BaseController
                 ? $this->competitionColor($competition)
                 : ['bg' => '#FFE0B2', 'fg' => '#5D4037', 'border' => '#FFB74D'];
 
+            $crewParts = [];
+            if ($includeCrews) {
+                $byLane = [];
+                foreach ($e->crewResults ?? [] as $cr) {
+                    if ($cr->lane !== null) {
+                        $byLane[(int) $cr->lane] = $cr;
+                    }
+                }
+                for ($i = 1; $i <= $laneCount; $i++) {
+                    $cr = $byLane[$i] ?? null;
+                    $name = $cr?->crew?->team?->name ?? '—';
+                    $crewParts[] = "L{$i}: {$name}";
+                }
+            }
+
             $byBlock[$blockKey]['entries'][] = [
                 'is_break' => false,
                 'race_number' => $e->race_number,
@@ -228,6 +250,7 @@ class ScheduleExportController extends BaseController
                 'stage' => $e->stage ?? '',
                 'stage_bg' => $stageBg,
                 'stage_fg' => $stageFg,
+                'crew_line' => $includeCrews ? implode('   ', $crewParts) : '',
             ];
         }
 
@@ -284,7 +307,7 @@ class ScheduleExportController extends BaseController
             ->get();
     }
 
-    private function buildCsv($entries, int $laneCount): string
+    private function buildCsv($entries, int $laneCount, bool $includeCrews = true): string
     {
         $headers = [
             'race_number',
@@ -299,8 +322,10 @@ class ScheduleExportController extends BaseController
             'stage',
             'label',
         ];
-        for ($i = 1; $i <= $laneCount; $i++) {
-            $headers[] = "lane{$i}_team";
+        if ($includeCrews) {
+            for ($i = 1; $i <= $laneCount; $i++) {
+                $headers[] = "lane{$i}_team";
+            }
         }
 
         $rows = [$headers];
@@ -316,8 +341,10 @@ class ScheduleExportController extends BaseController
                     $e->stage ?? '',
                     $e->label ?? '',
                 ];
-                for ($i = 1; $i <= $laneCount; $i++) {
-                    $row[] = '';
+                if ($includeCrews) {
+                    for ($i = 1; $i <= $laneCount; $i++) {
+                        $row[] = '';
+                    }
                 }
                 $rows[] = $row;
                 continue;
@@ -338,15 +365,17 @@ class ScheduleExportController extends BaseController
                 '', // label only used for breaks
             ];
 
-            $byLane = [];
-            foreach ($e->crewResults ?? [] as $cr) {
-                if ($cr->lane !== null) {
-                    $byLane[(int) $cr->lane] = $cr;
+            if ($includeCrews) {
+                $byLane = [];
+                foreach ($e->crewResults ?? [] as $cr) {
+                    if ($cr->lane !== null) {
+                        $byLane[(int) $cr->lane] = $cr;
+                    }
                 }
-            }
-            for ($i = 1; $i <= $laneCount; $i++) {
-                $cr = $byLane[$i] ?? null;
-                $row[] = $cr?->crew?->team?->name ?? '';
+                for ($i = 1; $i <= $laneCount; $i++) {
+                    $cr = $byLane[$i] ?? null;
+                    $row[] = $cr?->crew?->team?->name ?? '';
+                }
             }
             $rows[] = $row;
         }
@@ -361,7 +390,7 @@ class ScheduleExportController extends BaseController
         return $out;
     }
 
-    private function buildTxt(Event $event, $entries, ?string $day, int $laneCount): string
+    private function buildTxt(Event $event, $entries, ?string $day, int $laneCount, bool $includeCrews = true): string
     {
         $lines = [];
         $title = ($event->name ?? "Event #{$event->id}") . ' — Race Schedule';
@@ -423,12 +452,14 @@ class ScheduleExportController extends BaseController
                 $laneCount,
             );
 
-            for ($i = 1; $i <= $laneCount; $i++) {
-                $cr = $byLane[$i] ?? null;
-                $teamName = $cr?->crew?->team?->name ?? '-';
-                $lines[] = sprintf('       Lane %d: %s', $i, $teamName);
+            if ($includeCrews) {
+                for ($i = 1; $i <= $laneCount; $i++) {
+                    $cr = $byLane[$i] ?? null;
+                    $teamName = $cr?->crew?->team?->name ?? '-';
+                    $lines[] = sprintf('       Lane %d: %s', $i, $teamName);
+                }
+                $lines[] = '';
             }
-            $lines[] = '';
         }
 
         return implode("\n", $lines);
