@@ -5,9 +5,9 @@ namespace App\Http\Controllers\API;
 use App\Http\Controllers\API\BaseController as BaseController;
 use App\Models\Event;
 use App\Models\RaceResult;
-use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Mpdf\Mpdf;
 use OpenSpout\Writer\Common\Creator\WriterEntityFactory;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -223,15 +223,31 @@ class ScheduleExportController extends BaseController
             ];
         }
 
-        // PDF shows race rows only — one block per page.
-        $pdf = Pdf::loadView('exports.schedule', [
+        // PDF shows race rows only — one block per page. Rendered via mpdf
+        // (dompdf wouldn't honour th/col widths reliably).
+        $html = view('exports.schedule', [
             'title' => ($event->name ?? "Event #{$event->id}") . ' — Race Schedule',
             'dayFilter' => $day,
             'generatedAt' => now()->format('Y-m-d H:i'),
             'byBlock' => $byBlock,
-        ])->setPaper('a4', 'portrait');
+        ])->render();
 
-        return $pdf->output();
+        $tempDir = storage_path('app/mpdf');
+        if (!is_dir($tempDir)) {
+            @mkdir($tempDir, 0755, true);
+        }
+        $mpdf = new Mpdf([
+            'mode' => 'utf-8',
+            'format' => 'A4',
+            'orientation' => 'P',
+            'tempDir' => $tempDir,
+            'margin_left' => 12,
+            'margin_right' => 12,
+            'margin_top' => 12,
+            'margin_bottom' => 12,
+        ]);
+        $mpdf->WriteHTML($html);
+        return $mpdf->Output('', 'S');
     }
 
     private function loadEntries(Event $event, ?string $day)
