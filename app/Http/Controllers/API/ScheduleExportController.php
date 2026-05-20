@@ -236,7 +236,7 @@ class ScheduleExportController extends BaseController
         $html = view('exports.schedule', [
             'title' => ($event->name ?? "Event #{$event->id}") . ' — Race Schedule',
             'dayFilter' => $day,
-            'generatedAt' => now()->format('Y-m-d H:i'),
+            'generatedAt' => now()->setTimezone('Europe/Belgrade')->format('Y-m-d H:i'),
             'byBlock' => $byBlock,
         ])->render();
 
@@ -368,7 +368,7 @@ class ScheduleExportController extends BaseController
         $lines[] = $title;
         $lines[] = str_repeat('=', mb_strlen($title));
         $lines[] = $day ? "Day: {$day}" : 'All days';
-        $lines[] = 'Generated: ' . now()->format('Y-m-d H:i');
+        $lines[] = 'Generated: ' . now()->setTimezone('Europe/Belgrade')->format('Y-m-d H:i');
         $lines[] = '';
 
         $lastDate = null;
