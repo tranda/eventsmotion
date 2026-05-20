@@ -113,13 +113,13 @@
                 </div>
             </div>
 
-            <table class="races" width="100%">
+            <table class="races">
                 <thead>
                     <tr>
-                        <th class="num" width="22">#</th>
-                        <th class="time" width="34">Time</th>
-                        <th class="discipline">Discipline</th>
-                        <th class="stage" width="70">Stage</th>
+                        <th class="num" style="width: 22pt;">#</th>
+                        <th class="time" style="width: 34pt;">Time</th>
+                        <th class="discipline" style="width: auto;">Discipline</th>
+                        <th class="stage" style="width: 70pt;">Stage</th>
                     </tr>
                 </thead>
                 <tbody>

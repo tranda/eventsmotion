@@ -86,7 +86,7 @@ class ScheduleExportController extends BaseController
             $writer->addRow(WriterEntityFactory::createRowFromArray($headers));
 
             foreach ($entries as $e) {
-                $t = $e->race_time ? Carbon::parse($e->race_time) : null;
+                $t = $e->race_time ? Carbon::parse($e->race_time)->setTimezone('Europe/Belgrade') : null;
                 if ($e->isBreak()) {
                     $row = [
                         '',
@@ -154,7 +154,7 @@ class ScheduleExportController extends BaseController
         $byBlock = [];
         $orphanKey = '__orphan__';
         foreach ($entries as $e) {
-            $t = $e->race_time ? Carbon::parse($e->race_time) : null;
+            $t = $e->race_time ? Carbon::parse($e->race_time)->setTimezone('Europe/Belgrade') : null;
             $dateStr = $t?->toDateString() ?? '?';
 
             // Pin this entry to a block. For races we use filter matching;
@@ -281,7 +281,7 @@ class ScheduleExportController extends BaseController
 
         $rows = [$headers];
         foreach ($entries as $e) {
-            $t = $e->race_time ? Carbon::parse($e->race_time) : null;
+            $t = $e->race_time ? Carbon::parse($e->race_time)->setTimezone('Europe/Belgrade') : null;
             if ($e->isBreak()) {
                 $row = [
                     '',                                       // race_number
@@ -349,7 +349,7 @@ class ScheduleExportController extends BaseController
 
         $lastDate = null;
         foreach ($entries as $e) {
-            $t = $e->race_time ? Carbon::parse($e->race_time) : null;
+            $t = $e->race_time ? Carbon::parse($e->race_time)->setTimezone('Europe/Belgrade') : null;
             $dateStr = $t?->toDateString() ?? '?';
             if ($dateStr !== $lastDate) {
                 $lines[] = '';
