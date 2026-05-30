@@ -18,10 +18,24 @@ use InvalidArgumentException;
  * not by this service. LaneSeeder fills Repechages / Semis / Finals in order
  * after the prior rounds finish.
  *
- * Position references in the IDBF tables look like:
- *   "1st in hts"   → 1st overall by time across all heats
- *   "3rd in reps"  → 3rd overall by time across all repechages (rps/rsp typos accepted)
- *   "5th in SF"    → 5th overall by time across all semi-finals
+ * Position references in the IDBF tables follow a "winners first, then
+ * lucky losers by time" convention (per the IDBF Race Plans document —
+ * "Winner in each heat progress to Final ... Remainder to repechages
+ * based on heat times"):
+ *   - Positions 1..N (where N = number of races in the source stage) →
+ *     literal winners of each race, in race order (race 1 winner, race
+ *     2 winner, …).
+ *   - Positions N+1..M → remaining crews ranked by combined time across
+ *     the stage.
+ *
+ * So for RP.1 with 2 heats:
+ *   "1st in hts" → winner of Heat 1
+ *   "2nd in hts" → winner of Heat 2
+ *   "3rd in hts" → fastest non-winner across both heats (lucky loser)
+ *   "4th in hts" → next fastest non-winner
+ *   …
+ *
+ * Same rule for "Nth in reps" / "Nth in SF" (rps/rsp typos accepted).
  */
 class LaneSeeder
 {
@@ -197,8 +211,20 @@ class LaneSeeder
     }
 
     /**
-     * Compute the overall ranking for each source: a list of crew_ids ordered
-     * by combined time (FINISHED first by time_ms ascending, then DSQ/DNS/DNF).
+     * Compute the ranking for each source under IDBF "winners first, then
+     * lucky losers" semantics.
+     *
+     * For each source stage (heats / reps / semis):
+     *   1. Walk races in race order (by id).
+     *   2. The fastest finisher in each race is its WINNER — these become
+     *      positions 1..N in race order (race 1 winner, race 2 winner, …).
+     *   3. All non-winners across all races are then sorted by time and
+     *      occupy positions N+1..M.
+     *   4. DSQ/DNS/DNF (no time) sort last in either group, by id.
+     *
+     * So "1st in hts" / "2nd in hts" / … resolve to literal heat winners,
+     * NOT to the globally fastest crews. "3rd in hts" (with 2 heats) is
+     * the best lucky loser.
      *
      * @return array<string, int[]> source key → ordered crew_id list (1-indexed)
      */
@@ -209,18 +235,30 @@ class LaneSeeder
             $stagePrefix = $this->stagePrefixForSource($source);
             $races = RaceResult::where('discipline_id', $discipline->id)
                 ->where('stage', 'like', "{$stagePrefix}%")
-                ->pluck('id');
-            $crewResults = CrewResult::whereIn('race_result_id', $races)
-                ->get()
-                ->sort(function ($a, $b) {
-                    $aFinished = $a->status === 'FINISHED' && $a->time_ms !== null;
-                    $bFinished = $b->status === 'FINISHED' && $b->time_ms !== null;
-                    if ($aFinished !== $bFinished) return $aFinished ? -1 : 1;
-                    if ($aFinished && $bFinished) return $a->time_ms <=> $b->time_ms;
-                    return $a->id <=> $b->id;
-                })
-                ->values();
-            $rankings[$source] = $crewResults->pluck('crew_id')->all();
+                ->orderBy('id')
+                ->get();
+
+            $sortCrews = function ($a, $b) {
+                $aFinished = $a->status === 'FINISHED' && $a->time_ms !== null;
+                $bFinished = $b->status === 'FINISHED' && $b->time_ms !== null;
+                if ($aFinished !== $bFinished) return $aFinished ? -1 : 1;
+                if ($aFinished && $bFinished) return $a->time_ms <=> $b->time_ms;
+                return $a->id <=> $b->id;
+            };
+
+            $winners = [];
+            $nonWinners = collect();
+            foreach ($races as $race) {
+                $sorted = $race->crewResults()->get()->sort($sortCrews)->values();
+                if ($sorted->isEmpty()) continue;
+                $winners[] = $sorted->first()->crew_id;
+                foreach ($sorted->slice(1) as $cr) {
+                    $nonWinners->push($cr);
+                }
+            }
+
+            $nonWinnerIds = $nonWinners->sort($sortCrews)->values()->pluck('crew_id')->all();
+            $rankings[$source] = array_merge($winners, $nonWinnerIds);
         }
         return $rankings;
     }

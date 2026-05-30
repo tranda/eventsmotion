@@ -113,6 +113,111 @@ class LaneSeederTest extends TestCase
         $this->assertGreaterThan(0, $final->crewResults()->count());
     }
 
+    /**
+     * IDBF rule: position refs in seeding tables resolve to literal race
+     * winners first (positions 1..N in race order), then lucky losers by
+     * time. NOT a global time ranking.
+     *
+     * Builds a 7-crew RP.1 event (2 heats: H1=4, H2=3), times all heats
+     * so H2 finishers are FASTER than H1 finishers, and asserts that
+     * the Repechage / Grand Final lanes still pull H1's winner where the
+     * IDBF table says "1st in hts" — not the globally fastest crew.
+     */
+    public function test_winners_advance_first_even_when_other_heat_is_faster(): void
+    {
+        // Use 4-lane / 7-crew so we land on RP.1 (the case we discussed).
+        $event = Event::create([
+            'name' => 'Winner-First Test',
+            'location' => 'Pool',
+            'year' => 2026,
+            'lane_count' => 4,
+            'schedule_status' => 'draft',
+        ]);
+        $day = EventDay::create([
+            'event_id' => $event->id,
+            'date' => '2026-06-12',
+            'name' => 'Day 1',
+            'sort_order' => 0,
+        ]);
+        ScheduleBlock::create([
+            'event_day_id' => $day->id,
+            'name' => 'Morning',
+            'start_time' => '09:00:00',
+            'gap_seconds' => 240,
+            'sort_order' => 0,
+        ]);
+        $discipline = Discipline::create([
+            'event_id' => $event->id,
+            'distance' => '200m',
+            'age_group' => 'Senior',
+            'gender_group' => 'M',
+            'boat_group' => 'Standard',
+            'status' => 'active',
+        ]);
+        for ($i = 0; $i < 7; $i++) {
+            $team = Team::create(['name' => 'T' . ($i + 1)]);
+            Crew::create([
+                'team_id' => $team->id,
+                'discipline_id' => $discipline->id,
+                'seed_number' => $i + 1,
+            ]);
+        }
+        $this->generator->generate($event);
+
+        // Make Heat 2 SLOWER on average so "winner of H1" is also globally
+        // fastest — but make Heat 1's 2nd-place faster than Heat 2's winner.
+        // That way time-based ranking would put H1's 2nd ahead of H2's
+        // winner; winner-first ranking must still seat H2's winner as
+        // "2nd in hts".
+        $h1 = RaceResult::where('discipline_id', $discipline->id)
+            ->where('stage', 'Heat 1')->firstOrFail();
+        $h2 = RaceResult::where('discipline_id', $discipline->id)
+            ->where('stage', 'Heat 2')->firstOrFail();
+
+        $h1->update(['status' => 'FINISHED']);
+        foreach ($h1->crewResults()->orderBy('lane')->get() as $i => $cr) {
+            // H1 times: 60_000, 60_100, 60_200, 60_300 ms (winner @ lane 2)
+            // (lane 1 may be seed 5; the actual fastest is the first by lane
+            // after sort — for the test we just want a deterministic order)
+            CrewResult::where('id', $cr->id)->update([
+                'status' => 'FINISHED',
+                'time_ms' => 60_000 + $i * 100,
+            ]);
+        }
+        $h2->update(['status' => 'FINISHED']);
+        foreach ($h2->crewResults()->orderBy('lane')->get() as $i => $cr) {
+            // H2 times: 60_500, 60_600, 60_700 ms — H2 winner is SLOWER
+            // than H1's 2nd-, 3rd-, 4th-placers globally.
+            CrewResult::where('id', $cr->id)->update([
+                'status' => 'FINISHED',
+                'time_ms' => 60_500 + $i * 100,
+            ]);
+        }
+
+        // Use reflection to invoke the private buildRankings + compare crew_ids.
+        $seederRef = new \ReflectionClass($this->seeder);
+        $method = $seederRef->getMethod('buildRankings');
+        $method->setAccessible(true);
+        $rankings = $method->invoke($this->seeder, $discipline->fresh(), ['hts']);
+        $ordered = $rankings['hts'];
+
+        // Positions 1..2 must be the H1 + H2 winners (the fastest crew in
+        // each heat — lane-1 crew above, since we ordered by lane).
+        $h1WinnerId = $h1->crewResults()->orderBy('lane')->first()->crew_id;
+        $h2WinnerId = $h2->crewResults()->orderBy('lane')->first()->crew_id;
+        $this->assertSame($h1WinnerId, $ordered[0], '1st in hts should be H1 winner');
+        $this->assertSame($h2WinnerId, $ordered[1], '2nd in hts should be H2 winner');
+
+        // Position 3 ("3rd in hts") = best NON-winner overall by time.
+        // H1's 2nd-place crew (time 60_100) beats every H2 non-winner.
+        $h1Second = $h1->crewResults()->orderBy('lane')->get()[1];
+        $this->assertSame(
+            $h1Second->crew_id,
+            $ordered[2],
+            '3rd in hts should be the best lucky loser (H1 2nd, time 60_100)',
+        );
+    }
+
     public function test_skips_when_all_progression_stages_seeded(): void
     {
         [$event, $discipline] = $this->makeEventWithGenerator(crewCount: 12);
