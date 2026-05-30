@@ -54,6 +54,7 @@ return [
         'grand_final_lane_seeding' => [
             1 => '2nd in hts', 2 => '1st in hts', 3 => '1st in reps',
         ],
+        'source_orderings' => ['hts' => 1, 'reps' => 1],
         'advancement' => [
             '4 crews split into 2 heats (2 vs 2).',
             '1st of each heat → Grand Final.',
@@ -96,6 +97,7 @@ return [
         'grand_final_lane_seeding' => [
             1 => '1st in reps', 2 => '1st in hts', 3 => '2nd in hts', 4 => '2nd in reps',
         ],
+        'source_orderings' => ['hts' => 1, 'reps' => 1],
         'advancement' => [
             'Crews seeded in heats based on previous results.',
             'Winner of each heat → Grand Final (2 crews).',
@@ -131,6 +133,7 @@ return [
         'grand_final_lane_seeding' => [
             1 => '3rd in hts', 2 => '1st in hts', 3 => '2nd in hts', 4 => '1st in reps',
         ],
+        'source_orderings' => ['hts' => 1, 'reps' => 1],
         'advancement' => [
             'Variant of RP.1 — not in the IDBF Race Plans document.',
             '2 heat winners + next fastest overall → Grand Final (3 crews).',
@@ -159,6 +162,7 @@ return [
         'grand_final_lane_seeding' => [
             1 => '3rd in SF', 2 => '1st in SF', 3 => '2nd in SF', 4 => '4th in SF',
         ],
+        'source_orderings' => ['hts' => 1, 'reps' => 1, 'sf' => 1],
         'advancement' => [
             'Winner of each heat plus next fastest overall → semi-finals (4 crews).',
             'Remainder → repechages (5 to 12).',
@@ -189,6 +193,7 @@ return [
         'grand_final_lane_seeding' => [
             1 => '3rd in SF', 2 => '1st in SF', 3 => '2nd in SF', 4 => '4th in SF',
         ],
+        'source_orderings' => ['hts' => 2, 'reps' => 2, 'sf' => 1],
         'advancement' => [
             '1st and 2nd in each heat → semi-finals (8 crews).',
             'Remainder → repechages (9 to 16).',
@@ -229,6 +234,7 @@ return [
         'grand_final_lane_seeding' => [
             1 => '2nd in reps', 2 => '3rd in hts', 3 => '1st in hts', 4 => '2nd in hts', 5 => '1st in reps', 6 => '3rd in reps',
         ],
+        'source_orderings' => ['hts' => 1, 'reps' => 3],
         'advancement' => [
             'Winner of each heat plus next fastest overall in both heats → Grand Final (3 crews).',
             'Remainder → repechage (4 to 8).',
@@ -267,6 +273,7 @@ return [
         'grand_final_lane_seeding' => [
             1 => '2nd in reps', 2 => '3rd in hts', 3 => '1st in hts', 4 => '2nd in hts', 5 => '1st in reps', 6 => '3rd in reps',
         ],
+        'source_orderings' => ['hts' => 1, 'reps' => 3],
         'advancement' => [
             'Winner of each heat plus next fastest overall in both heats → Grand Final (3 crews).',
             'Remainder → repechage (4 to 12).',
@@ -299,6 +306,7 @@ return [
         'grand_final_lane_seeding' => [
             1 => '5th in SF', 2 => '3rd in SF', 3 => '1st in SF', 4 => '2nd in SF', 5 => '4th in SF', 6 => '6th in SF',
         ],
+        'source_orderings' => ['hts' => 2, 'reps' => 2, 'sf' => 2],
         'advancement' => [
             '1st and 2nd in each heat → semi-finals (6 crews).',
             'Remainder → repechages (13 to 18).',
@@ -335,6 +343,7 @@ return [
         'grand_final_lane_seeding' => [
             1 => '5th in SF', 2 => '3rd in SF', 3 => '1st in SF', 4 => '2nd in SF', 5 => '4th in SF', 6 => '6th in SF',
         ],
+        'source_orderings' => ['hts' => 3, 'reps' => 3, 'sf' => 1],
         'advancement' => [
             '1st, 2nd and 3rd in each heat → semi-finals (12 crews).',
             'Remainder → repechages (13 to 24).',
@@ -373,6 +382,7 @@ return [
         'grand_final_lane_seeding' => [
             1 => '5th in SF', 2 => '3rd in SF', 3 => '1st in SF', 4 => '2nd in SF', 5 => '4th in SF', 6 => '6th in SF',
         ],
+        'source_orderings' => ['hts' => 2, 'reps' => 1, 'sf' => 1],
         'advancement' => [
             '1st and 2nd in each heat plus next 3 fastest overall → semi-finals (13 crews).',
             'Remainder → repechages (14 to 30).',
@@ -412,6 +422,7 @@ return [
         'grand_final_lane_seeding' => [
             1 => '5th in SF', 2 => '3rd in SF', 3 => '1st in SF', 4 => '2nd in SF', 5 => '4th in SF', 6 => '6th in SF',
         ],
+        'source_orderings' => ['hts' => 3, 'reps' => 1, 'sf' => 1],
         'advancement' => [
             '1st, 2nd and 3rd in each heat → semi-finals (18 crews).',
             'Remainder → repechages (19 to 36).',
@@ -457,6 +468,7 @@ return [
         'grand_final_lane_seeding' => [
             1 => '5th in SF', 2 => '3rd in SF', 3 => '1st in SF', 4 => '2nd in SF', 5 => '4th in SF', 6 => '6th in SF',
         ],
+        'source_orderings' => ['hts' => 3, 'reps' => 3, 'sf' => 1],
         'advancement' => [
             '1st, 2nd and 3rd in each heat → semi-finals (21 crews).',
             'Remainder → repechages (22 to 42).',
@@ -500,6 +512,7 @@ return [
         'grand_final_lane_seeding' => [
             1 => '3rd in reps', 2 => '1st in reps', 3 => '3rd in hts', 4 => '1st in hts', 5 => '2nd in hts', 6 => '4th in hts', 7 => '2nd in reps', 8 => '4th in reps',
         ],
+        'source_orderings' => ['hts' => 2, 'reps' => 4],
         'advancement' => [
             '1st and 2nd in each heat → Grand Final (4 crews).',
             'Remainder → repechage (5 to 12).',
@@ -523,6 +536,7 @@ return [
         'grand_final_lane_seeding' => [
             1 => '3rd in reps', 2 => '1st in reps', 3 => '3rd in hts', 4 => '1st in hts', 5 => '2nd in hts', 6 => '4th in hts', 7 => '2nd in reps', 8 => '4th in reps',
         ],
+        'source_orderings' => ['hts' => 2, 'reps' => 2],
         'advancement' => [
             '1st and 2nd in each heat → Grand Final (4 crews).',
             'Remainder → repechage (5 to 16).',
@@ -552,6 +566,7 @@ return [
         'grand_final_lane_seeding' => [
             1 => '7th in SF', 2 => '5th in SF', 3 => '3rd in SF', 4 => '1st in SF', 5 => '2nd in SF', 6 => '4th in SF', 7 => '6th in SF', 8 => '8th in SF',
         ],
+        'source_orderings' => ['hts' => 2, 'reps' => 3, 'sf' => 3],
         'advancement' => [
             '1st and 2nd in each heat plus next 2 fastest overall → semi-finals (8 crews).',
             'Remainder → repechage (9 to 24).',
@@ -587,6 +602,7 @@ return [
         'grand_final_lane_seeding' => [
             1 => '7th in SF', 2 => '5th in SF', 3 => '3rd in SF', 4 => '1st in SF', 5 => '2nd in SF', 6 => '4th in SF', 7 => '6th in SF', 8 => '8th in SF',
         ],
+        'source_orderings' => ['hts' => 4, 'reps' => 3, 'sf' => 2],
         'advancement' => [
             '1st, 2nd, 3rd and 4th in each heat → semi-finals (16 crews).',
             'Remainder → repechage (17 to 32).',
@@ -624,6 +640,7 @@ return [
         'grand_final_lane_seeding' => [
             1 => '7th in SF', 2 => '5th in SF', 3 => '3rd in SF', 4 => '1st in SF', 5 => '2nd in SF', 6 => '4th in SF', 7 => '6th in SF', 8 => '8th in SF',
         ],
+        'source_orderings' => ['hts' => 3, 'reps' => 2, 'sf' => 2],
         'advancement' => [
             '1st, 2nd and 3rd in each heat plus next fastest overall → semi-finals (16 crews).',
             'Remainder → repechage (17 to 40).',
@@ -667,6 +684,7 @@ return [
         'grand_final_lane_seeding' => [
             1 => '7th in SF', 2 => '5th in SF', 3 => '3rd in SF', 4 => '1st in SF', 5 => '2nd in SF', 6 => '4th in SF', 7 => '6th in SF', 8 => '8th in SF',
         ],
+        'source_orderings' => ['hts' => 3, 'reps' => 2, 'sf' => 1],
         'advancement' => [
             '1st, 2nd and 3rd in each heat plus next 4 fastest overall → semi-finals (22 crews).',
             'Remainder → repechage (23 to 48).',

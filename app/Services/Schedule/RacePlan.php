@@ -281,6 +281,28 @@ class RacePlan
     }
 
     /**
+     * Number of explicit "Nth in race" tiers honoured when resolving
+     * "Nth in {hts|reps|sf}" position refs.
+     *
+     * Per the IDBF Race Plans document, each plan declares how many
+     * positions per source race are guaranteed-advancing slots before
+     * the "next K fastest overall" lucky-loser tail kicks in.
+     *
+     * Examples:
+     *   "Winner of each heat plus next fastest overall"  → tiers = 1
+     *   "1st and 2nd in each heat"                       → tiers = 2
+     *   "1st, 2nd and 3rd in each heat plus next 4 fastest" → tiers = 3
+     *
+     * Defaults to 1 (the previous behaviour: only race winners guaranteed,
+     * everything else by combined time). Source keys: 'hts', 'reps', 'sf'.
+     */
+    public function sourceOrderingTiers(string $source): int
+    {
+        $orderings = $this->data['source_orderings'] ?? [];
+        return (int) ($orderings[$source] ?? 1);
+    }
+
+    /**
      * Lane → position-reference map for repechages, semis, finals.
      * Returns null when the plan does not include this stage type.
      *

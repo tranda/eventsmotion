@@ -103,7 +103,7 @@ class LaneSeeder
                 return $result;
             }
 
-            $rankings = $this->buildRankings($discipline, $sources);
+            $rankings = $this->buildRankings($discipline, $plan, $sources);
 
             DB::transaction(function () use ($stageRaces, $seedingMap, $rankings, $result, $stageName) {
                 // For multi-race stages (e.g. Semi 1, Semi 2), each race gets its own seeding row.
@@ -211,24 +211,36 @@ class LaneSeeder
     }
 
     /**
-     * Compute the ranking for each source under IDBF "winners first, then
-     * lucky losers" semantics.
+     * Compute the ranking for each source stage under IDBF tiered semantics.
      *
-     * For each source stage (heats / reps / semis):
-     *   1. Walk races in race order (by id).
-     *   2. The fastest finisher in each race is its WINNER — these become
-     *      positions 1..N in race order (race 1 winner, race 2 winner, …).
-     *   3. All non-winners across all races are then sorted by time and
-     *      occupy positions N+1..M.
-     *   4. DSQ/DNS/DNF (no time) sort last in either group, by id.
+     * Each plan declares a `tiers` count per source ("hts", "reps", "sf")
+     * — the number of explicit positions per source race that are
+     * guaranteed-advancing slots. The IDBF advancement text maps to it:
+     *   "Winner of each heat (...)"                    → tiers = 1
+     *   "1st and 2nd in each heat"                     → tiers = 2
+     *   "1st, 2nd and 3rd in each heat"                → tiers = 3
      *
-     * So "1st in hts" / "2nd in hts" / … resolve to literal heat winners,
-     * NOT to the globally fastest crews. "3rd in hts" (with 2 heats) is
-     * the best lucky loser.
+     * Resolution rule:
+     *   1. Enumerate tier by tier (tier 1: 1st-place of race 1, 1st-place
+     *      of race 2, …; then tier 2: 2nd-place of race 1, 2nd-place of
+     *      race 2, …; …).
+     *   2. After all guaranteed tiers are placed, append remaining crews
+     *      ordered by combined time across the stage (these are the
+     *      "next K fastest overall" lucky losers that some plans add on
+     *      top of the explicit tiers).
+     *   3. DSQ/DNS/DNF (no time) sort last in either group.
+     *
+     * Example RP.3 (tiers=2, 4 heats):
+     *   pos 1..4 = winners of H1..H4
+     *   pos 5..8 = 2nd-placers of H1..H4
+     *   pos 9..  = remaining (3rd, 4th …) by overall time
+     *
+     * Default tier count is 1 (the previous winners-then-time behaviour,
+     * correct for RP.1 / RP.2 / RP.1A / RP.2A / etc.).
      *
      * @return array<string, int[]> source key → ordered crew_id list (1-indexed)
      */
-    private function buildRankings(Discipline $discipline, array $sources): array
+    private function buildRankings(Discipline $discipline, RacePlan $plan, array $sources): array
     {
         $rankings = [];
         foreach ($sources as $source) {
@@ -246,19 +258,40 @@ class LaneSeeder
                 return $a->id <=> $b->id;
             };
 
-            $winners = [];
-            $nonWinners = collect();
-            foreach ($races as $race) {
-                $sorted = $race->crewResults()->get()->sort($sortCrews)->values();
-                if ($sorted->isEmpty()) continue;
-                $winners[] = $sorted->first()->crew_id;
-                foreach ($sorted->slice(1) as $cr) {
-                    $nonWinners->push($cr);
+            // Per-race results sorted best-to-worst by time.
+            $perRace = $races->map(
+                fn($r) => $r->crewResults()->get()->sort($sortCrews)->values()
+            );
+
+            $tiers = max(1, $plan->sourceOrderingTiers($source));
+
+            $ordered = [];
+            $usedIds = [];
+
+            // Tiered round-robin: tier T → take Tth-best from each race in order.
+            for ($t = 1; $t <= $tiers; $t++) {
+                foreach ($perRace as $raceResults) {
+                    $cr = $raceResults[$t - 1] ?? null;
+                    if ($cr === null) continue;
+                    $ordered[] = $cr->crew_id;
+                    $usedIds[$cr->crew_id] = true;
                 }
             }
 
-            $nonWinnerIds = $nonWinners->sort($sortCrews)->values()->pluck('crew_id')->all();
-            $rankings[$source] = array_merge($winners, $nonWinnerIds);
+            // Tail: remaining crews, globally by time.
+            $remaining = collect();
+            foreach ($perRace as $raceResults) {
+                foreach ($raceResults as $cr) {
+                    if (!isset($usedIds[$cr->crew_id])) {
+                        $remaining->push($cr);
+                    }
+                }
+            }
+            foreach ($remaining->sort($sortCrews)->values() as $cr) {
+                $ordered[] = $cr->crew_id;
+            }
+
+            $rankings[$source] = $ordered;
         }
         return $rankings;
     }

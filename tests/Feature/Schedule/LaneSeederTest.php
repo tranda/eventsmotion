@@ -218,6 +218,118 @@ class LaneSeederTest extends TestCase
         );
     }
 
+    /**
+     * Tiered semantics: when a plan declares tiers >= 2 for a source stage,
+     * positions are filled round-robin by tier (1st of each race, then 2nd
+     * of each race, …) BEFORE any lucky-loser fill-in.
+     *
+     * Uses RP.3 (4 lanes, 13 crews, tiers['hts']=2). Times are arranged so
+     * Heat 1's 3rd-placer is globally faster than Heat 2/3/4's 2nd-placers.
+     * Under winners-only-then-time, "5th in hts" would be H1's 3rd. Under
+     * IDBF tiered semantics it must be H1's 2nd-placer (tier 2, race 1).
+     */
+    public function test_tiered_ranking_uses_explicit_positions_before_lucky_losers(): void
+    {
+        $event = Event::create([
+            'name' => 'RP.3 Tier Test',
+            'location' => 'Pool',
+            'year' => 2026,
+            'lane_count' => 4,
+            'schedule_status' => 'draft',
+        ]);
+        $day = EventDay::create([
+            'event_id' => $event->id,
+            'date' => '2026-06-12',
+            'name' => 'Day 1',
+            'sort_order' => 0,
+        ]);
+        ScheduleBlock::create([
+            'event_day_id' => $day->id,
+            'name' => 'Morning',
+            'start_time' => '09:00:00',
+            'gap_seconds' => 240,
+            'sort_order' => 0,
+        ]);
+        $discipline = Discipline::create([
+            'event_id' => $event->id,
+            'distance' => '200m',
+            'age_group' => 'Senior',
+            'gender_group' => 'M',
+            'boat_group' => 'Standard',
+            'status' => 'active',
+        ]);
+        for ($i = 0; $i < 13; $i++) {
+            $team = Team::create(['name' => 'T' . ($i + 1)]);
+            Crew::create([
+                'team_id' => $team->id,
+                'discipline_id' => $discipline->id,
+                'seed_number' => $i + 1,
+            ]);
+        }
+        $this->generator->generate($event);
+
+        // RP.3 has 4 heats (composition varies: 13 crews → H1=4, H2=3, H3=3, H4=3).
+        // Stamp times so Heat 1's 3rd place (lane index 2) is faster than
+        // the other heats' 2nd-placers. Specifically:
+        //   H1 times: 60_000 / 60_100 / 60_200 / 60_300
+        //   H2 times: 60_500 / 60_600 / 60_700        (2nd=60_600)
+        //   H3 times: 60_550 / 60_650 / 60_750        (2nd=60_650)
+        //   H4 times: 60_580 / 60_680 / 60_780        (2nd=60_680)
+        // Time ranking globally: H1.1, H1.2, H1.3, H1.4, H2.1, H3.1, H4.1, H2.2, H3.2, H4.2, ...
+        $heatStartTimes = [
+            'Heat 1' => 60_000,
+            'Heat 2' => 60_500,
+            'Heat 3' => 60_550,
+            'Heat 4' => 60_580,
+        ];
+        foreach ($heatStartTimes as $stage => $base) {
+            $heat = RaceResult::where('discipline_id', $discipline->id)
+                ->where('stage', $stage)->firstOrFail();
+            $heat->update(['status' => 'FINISHED']);
+            foreach ($heat->crewResults()->orderBy('lane')->get() as $i => $cr) {
+                CrewResult::where('id', $cr->id)->update([
+                    'status' => 'FINISHED',
+                    'time_ms' => $base + $i * 100,
+                ]);
+            }
+        }
+
+        $plans = new IdbfRacePlans();
+        $plan = $plans->getPlan('RP.3');
+        $this->assertSame(2, $plan->sourceOrderingTiers('hts'),
+            'sanity: RP.3 should declare 2 tiers from heats');
+
+        // Build rankings via reflection.
+        $seederRef = new \ReflectionClass($this->seeder);
+        $method = $seederRef->getMethod('buildRankings');
+        $method->setAccessible(true);
+        $rankings = $method->invoke($this->seeder, $discipline->fresh(), $plan, ['hts']);
+        $ordered = $rankings['hts'];
+
+        // Helper: get the crew at a heat's Nth lane (lanes ordered by time).
+        $crewAt = function (string $stage, int $place) use ($discipline) {
+            $heat = RaceResult::where('discipline_id', $discipline->id)
+                ->where('stage', $stage)->firstOrFail();
+            $sorted = $heat->crewResults()->orderBy('lane')->get();
+            return $sorted[$place - 1]->crew_id;
+        };
+
+        // Tier 1 (positions 1..4) = winners in race order: H1, H2, H3, H4.
+        $this->assertSame($crewAt('Heat 1', 1), $ordered[0], '1st = H1 winner');
+        $this->assertSame($crewAt('Heat 2', 1), $ordered[1], '2nd = H2 winner');
+        $this->assertSame($crewAt('Heat 3', 1), $ordered[2], '3rd = H3 winner');
+        $this->assertSame($crewAt('Heat 4', 1), $ordered[3], '4th = H4 winner');
+
+        // Tier 2 (positions 5..8) = 2nd-placers in race order, NOT lucky losers.
+        // Under the old winners-only logic, position 5 would be H1's 3rd
+        // (time 60_200, globally 3rd fastest non-winner). Under tiered
+        // semantics it must be H1's 2nd-placer.
+        $this->assertSame($crewAt('Heat 1', 2), $ordered[4], '5th = H1 2nd (tier 2)');
+        $this->assertSame($crewAt('Heat 2', 2), $ordered[5], '6th = H2 2nd (tier 2)');
+        $this->assertSame($crewAt('Heat 3', 2), $ordered[6], '7th = H3 2nd (tier 2)');
+        $this->assertSame($crewAt('Heat 4', 2), $ordered[7], '8th = H4 2nd (tier 2)');
+    }
+
     public function test_skips_when_all_progression_stages_seeded(): void
     {
         [$event, $discipline] = $this->makeEventWithGenerator(crewCount: 12);
