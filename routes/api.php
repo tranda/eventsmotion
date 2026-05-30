@@ -187,6 +187,12 @@ Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     // Bulk-register crews from a CSV matrix
     Route::post('events/{event}/registrations/import', [CrewRegistrationController::class, 'import']);
     Route::delete('events/{event}/registrations', [CrewRegistrationController::class, 'clearAll']);
+
+    // Schedule snapshots — save/restore named slices of the builder state.
+    Route::get('events/{event}/snapshots', [\App\Http\Controllers\API\ScheduleSnapshotController::class, 'index']);
+    Route::post('events/{event}/snapshots', [\App\Http\Controllers\API\ScheduleSnapshotController::class, 'store']);
+    Route::delete('snapshots/{id}', [\App\Http\Controllers\API\ScheduleSnapshotController::class, 'destroy']);
+    Route::post('snapshots/{id}/restore', [\App\Http\Controllers\API\ScheduleSnapshotController::class, 'restore']);
 });
 
 Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
