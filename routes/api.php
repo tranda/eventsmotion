@@ -158,6 +158,7 @@ Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::put('event-days/{day}', [ScheduleConfigController::class, 'updateDay']);
     Route::delete('event-days/{day}', [ScheduleConfigController::class, 'destroyDay']);
     Route::post('event-days/{day}/blocks', [ScheduleConfigController::class, 'storeBlock']);
+    Route::post('event-days/{day}/copy-blocks', [ScheduleConfigController::class, 'copyBlocks']);
     Route::put('schedule-blocks/{block}', [ScheduleConfigController::class, 'updateBlock']);
     Route::delete('schedule-blocks/{block}', [ScheduleConfigController::class, 'destroyBlock']);
 

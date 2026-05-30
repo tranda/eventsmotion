@@ -131,6 +131,61 @@ class ScheduleConfigController extends BaseController
         return $this->sendResponse($day, 'Event day updated.');
     }
 
+    /**
+     * POST /api/event-days/{id}/copy-blocks
+     * Body: { from_day_id: int, replace?: bool }
+     *
+     * Copies every block from from_day_id to the target day. With
+     * replace=true (default), existing blocks on the target day are
+     * deleted first — clean clone. Useful to make day 2's schedule
+     * structurally identical to day 1's.
+     */
+    public function copyBlocks(Request $request, $targetDayId)
+    {
+        $target = EventDay::find($targetDayId);
+        if (!$target) {
+            return $this->sendError('Target day not found', [], 404);
+        }
+        $data = $request->validate([
+            'from_day_id' => 'required|integer|different:target',
+            'replace' => 'sometimes|boolean',
+        ]);
+        $source = EventDay::find($data['from_day_id']);
+        if (!$source) {
+            return $this->sendError('Source day not found', [], 404);
+        }
+        if ($source->event_id !== $target->event_id) {
+            return $this->sendError('Source and target days must belong to the same event', [], 422);
+        }
+
+        $replace = (bool) ($data['replace'] ?? true);
+        $copied = 0;
+        \Illuminate\Support\Facades\DB::transaction(function () use ($source, $target, $replace, &$copied) {
+            if ($replace) {
+                ScheduleBlock::where('event_day_id', $target->id)->delete();
+            }
+            foreach ($source->blocks()->orderBy('sort_order')->get() as $b) {
+                ScheduleBlock::create([
+                    'event_day_id' => $target->id,
+                    'name' => $b->name,
+                    'start_time' => $b->start_time,
+                    'gap_seconds' => $b->gap_seconds,
+                    'gender_filter' => $b->gender_filter,
+                    'distance_filter' => $b->distance_filter,
+                    'stage_filter' => $b->stage_filter,
+                    'competition_filter' => $b->competition_filter,
+                    'sort_order' => $b->sort_order,
+                ]);
+                $copied++;
+            }
+        });
+
+        return $this->sendResponse(
+            ['blocks_copied' => $copied],
+            "Copied {$copied} block(s) from day {$source->date} to day {$target->date}.",
+        );
+    }
+
     /** DELETE /api/event-days/{id} */
     public function destroyDay($dayId)
     {
