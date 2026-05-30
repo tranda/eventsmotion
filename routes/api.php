@@ -115,6 +115,7 @@ Route::get('teamsAll', [TeamController::class, 'getAllTeams']);
 Route::middleware('auth:sanctum')->get('teams', [TeamController::class, 'getTeamsForClub']);
 Route::middleware('auth:sanctum')->get('teamsForDiscipline', [TeamController::class, 'getTeamsForDiscipline']);
 Route::middleware('auth:sanctum')->post('team', [TeamController::class, 'createTeam']);
+Route::middleware(['auth:sanctum', 'admin'])->put('teams/{id}', [TeamController::class, 'updateTeam']);
 Route::middleware(['auth:sanctum', 'admin'])->delete('teams/{id}', [TeamController::class, 'deleteTeam']);
 
 Route::get('crewsAll', [CrewController::class, 'getAllCrews']);

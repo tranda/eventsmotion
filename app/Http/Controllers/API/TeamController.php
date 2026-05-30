@@ -118,6 +118,24 @@ class TeamController extends BaseController
         return response()->json($team);
     }
 
+    public function updateTeam(Request $request, $id)
+    {
+        $team = Team::find($id);
+        if (!$team) {
+            return response()->json(['error' => 'Team not found'], 404);
+        }
+
+        $name = trim((string) $request->input('name'));
+        if ($name === '') {
+            return response()->json(['error' => 'Team name is required'], 422);
+        }
+
+        $team->name = $name;
+        $team->save();
+
+        return response()->json($team);
+    }
+
     public function deleteTeam($id)
     {
         $team = Team::find($id);
