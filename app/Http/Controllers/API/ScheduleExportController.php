@@ -587,20 +587,34 @@ class ScheduleExportController extends BaseController
      * Distinct light-tint background per competition string (Club, Corporate,
      * Highschool, University, …). Stable: same string → same colour every
      * time, so an event keeps its colour-coding consistent across re-exports.
+     *
+     * Mirrors the frontend `competitionBadgeColor()` in lib/src/common.dart so
+     * the on-screen Grid and the exported PDF agree on which colour belongs to
+     * each competition. Palette = Material purple/teal/indigo/deepOrange/pink/
+     * brown, shaded 50/200/700. Hash = sum of lowercase UTF-16 code units mod 6
+     * (matches Dart's `String.toLowerCase().codeUnits.fold((a,b)=>a+b)`).
      */
     private function competitionColor(string $name): array
     {
         $palette = [
-            ['bg' => '#FFE0B2', 'border' => '#FFB74D', 'fg' => '#5D4037'], // amber
-            ['bg' => '#C5CAE9', 'border' => '#7986CB', 'fg' => '#1A237E'], // indigo
-            ['bg' => '#B2DFDB', 'border' => '#4DB6AC', 'fg' => '#004D40'], // teal
-            ['bg' => '#F8BBD0', 'border' => '#F06292', 'fg' => '#880E4F'], // pink
-            ['bg' => '#DCEDC8', 'border' => '#AED581', 'fg' => '#33691E'], // light green
-            ['bg' => '#D1C4E9', 'border' => '#9575CD', 'fg' => '#311B92'], // deep purple
-            ['bg' => '#FFCDD2', 'border' => '#E57373', 'fg' => '#B71C1C'], // red
-            ['bg' => '#B3E5FC', 'border' => '#4FC3F7', 'fg' => '#01579B'], // light blue
+            ['bg' => '#F3E5F5', 'border' => '#CE93D8', 'fg' => '#7B1FA2'], // purple
+            ['bg' => '#E0F2F1', 'border' => '#80CBC4', 'fg' => '#00796B'], // teal
+            ['bg' => '#E8EAF6', 'border' => '#9FA8DA', 'fg' => '#303F9F'], // indigo
+            ['bg' => '#FBE9E7', 'border' => '#FFAB91', 'fg' => '#E64A19'], // deepOrange
+            ['bg' => '#FCE4EC', 'border' => '#F48FB1', 'fg' => '#C2185B'], // pink
+            ['bg' => '#EFEBE9', 'border' => '#BCAAA4', 'fg' => '#5D4037'], // brown
         ];
-        $idx = abs(crc32(strtolower(trim($name)))) % count($palette);
+        $lower = mb_strtolower($name, 'UTF-8');
+        $sum = 0;
+        // mb_str_split → array of characters; mb_ord gives the Unicode code
+        // point. For ASCII-only competition names ("Club", "Corporate") this
+        // matches Dart's `codeUnits` exactly; for BMP non-ASCII it also
+        // matches because a single UTF-16 code unit == the code point there.
+        foreach (mb_str_split($lower, 1, 'UTF-8') as $ch) {
+            $cp = mb_ord($ch, 'UTF-8');
+            $sum += ($cp !== false ? $cp : 0);
+        }
+        $idx = $sum % count($palette);
         return $palette[$idx];
     }
 
