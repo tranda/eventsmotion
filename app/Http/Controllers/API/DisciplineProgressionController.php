@@ -123,14 +123,25 @@ class DisciplineProgressionController extends BaseController
             },
             'disciplines.progression',
             'disciplines.crews',
+            'eventDays.blocks',
         ])->find($eventId);
 
         if (!$event) {
             return $this->sendError('Event not found', [], 404);
         }
 
+        // Pre-compute ordered blocks (day.sort_order, then block.sort_order)
+        // so we can predict which day each discipline lands on without
+        // touching the existing schedule.
+        $orderedBlocks = [];
+        foreach ($event->eventDays->sortBy('sort_order') as $day) {
+            foreach ($day->blocks->sortBy('sort_order') as $b) {
+                $orderedBlocks[] = ['day' => $day, 'block' => $b];
+            }
+        }
+
         $laneCount = (int) ($event->lane_count ?? 0);
-        $disciplines = $event->disciplines->map(function ($d) use ($laneCount) {
+        $disciplines = $event->disciplines->map(function ($d) use ($laneCount, $orderedBlocks) {
             $crewCount = $d->crews->count();
 
             // Auto-pick (best-fit IDBF plan).
@@ -150,6 +161,20 @@ class DisciplineProgressionController extends BaseController
                 : [];
             $options[] = 'CUSTOM';
 
+            // Predict which day this discipline's races land on by finding
+            // the first ordered block whose filters match. Returns null if
+            // no block matches (orphan / no scheduling rules cover it).
+            $predictedDay = null;
+            foreach ($orderedBlocks as $bd) {
+                if ($this->disciplineMatchesBlock($d, $bd['block'])) {
+                    $dayDate = $bd['day']->date;
+                    $predictedDay = $dayDate instanceof \Carbon\Carbon
+                        ? $dayDate->toDateString()
+                        : (string) $dayDate;
+                    break;
+                }
+            }
+
             return [
                 'id' => $d->id,
                 'name' => method_exists($d, 'getDisplayName')
@@ -161,6 +186,7 @@ class DisciplineProgressionController extends BaseController
                 'distance' => $d->distance,
                 'competition' => $d->competition,
                 'status' => $d->status,
+                'predicted_day' => $predictedDay,
                 'progression' => [
                     'discipline_id' => $d->id,
                     'crew_count' => $crewCount,
@@ -179,6 +205,38 @@ class DisciplineProgressionController extends BaseController
             'lane_count' => $laneCount,
             'disciplines' => $disciplines,
         ], 'Plan & Seeds bulk fetch.');
+    }
+
+    /**
+     * Pre-generation filter match: does this discipline qualify for the
+     * given block? Mirrors the logic in ScheduleGeneratorService::matchesBlock
+     * but checks only the discipline (no stage / no race row). Stage filter
+     * is ignored because pre-generation we don't know which stage names a
+     * future race will have.
+     */
+    private function disciplineMatchesBlock($discipline, $block): bool
+    {
+        $gf = $block->gender_filter;
+        if (is_array($gf) && !empty($gf)) {
+            $map = ['M' => 'Open', 'W' => 'Women', 'X' => 'Mixed'];
+            $needles = array_map(fn($v) => $map[strtoupper((string) $v)] ?? $v, $gf);
+            if (!in_array($discipline->gender_group, $needles, true)) return false;
+        }
+        $df = $block->distance_filter;
+        if (is_array($df) && !empty($df)) {
+            $needles = array_values(array_filter(
+                array_map(fn($v) => preg_replace('/\D/', '', (string) $v), $df),
+                fn($v) => $v !== '',
+            ));
+            if (!in_array((string) $discipline->distance, $needles, true)) return false;
+        }
+        $cf = $block->competition_filter;
+        if (is_array($cf) && !empty($cf)) {
+            $c = strtolower((string) ($discipline->competition ?? ''));
+            $needles = array_map(fn($v) => strtolower((string) $v), $cf);
+            if (!in_array($c, $needles, true)) return false;
+        }
+        return true;
     }
 
     /** GET /api/disciplines/{id}/race-plan-options */

@@ -29,13 +29,18 @@ class ScheduleGeneratorService
     /**
      * Regenerate the full schedule for an event.
      *
-     * @param bool $clean When true, skips the snapshot/restore step — every
-     *                    race is freshly placed from block.start, ignoring
-     *                    any prior drag-edited ordering. Use to "start over"
-     *                    when the schedule has gone sideways.
+     * @param bool        $clean When true, skips the snapshot/restore step
+     *                           — every race is freshly placed from block
+     *                           .start, ignoring any prior drag-edited
+     *                           ordering. Use to "start over" when the
+     *                           schedule has gone sideways.
+     * @param string|null $day   YYYY-MM-DD. When set, only regenerates
+     *                           disciplines whose first matching block
+     *                           lands on that day. Other days' races are
+     *                           preserved (not deleted, not re-placed).
      * @throws InvalidArgumentException if no event days/blocks exist
      */
-    public function generate(Event $event, bool $clean = false): GenerationResult
+    public function generate(Event $event, bool $clean = false, ?string $day = null): GenerationResult
     {
         $eventDays = $event->eventDays()->with('blocks')->get();
         if ($eventDays->isEmpty()) {
@@ -57,18 +62,38 @@ class ScheduleGeneratorService
             ->orderBy('id')
             ->get();
 
+        // Per-day mode: narrow the discipline list to those whose first
+        // matching block lands on the requested day. We delete + regen only
+        // for those disciplines, leaving the rest of the schedule alone.
+        if ($day !== null) {
+            $disciplines = $disciplines->filter(function ($d) use ($orderedBlocks, $day) {
+                $primary = $this->primaryDayForDiscipline($d, $orderedBlocks);
+                return $primary === $day;
+            })->values();
+            if ($disciplines->isEmpty()) {
+                $result = new GenerationResult();
+                $result->addWarning("No active disciplines schedule into day {$day}.");
+                return $result;
+            }
+        }
+
         $result = new GenerationResult();
 
         $defaultRounds = (int) ($event->default_rounds ?? 3);
-        DB::transaction(function () use ($event, $disciplines, $orderedBlocks, $defaultRounds, $result, $clean) {
-            // Snapshot existing race times by (discipline_id, stage) so they
-            // survive the delete+recreate cycle. Manual drag-reorders stay
-            // put on a full event regenerate; only truly new stages (new
-            // discipline or changed plan) get freshly placed.
-            // Skipped in clean mode — every race rebuilds from block.start.
+        DB::transaction(function () use ($event, $disciplines, $orderedBlocks, $defaultRounds, $result, $clean, $day) {
             $preservedTimes = $clean ? [] : $this->snapshotRaceTimes($event);
 
-            $this->deleteScheduledRaces($event);
+            if ($day === null) {
+                // Full-event regenerate: wipe all SCHEDULED races.
+                $this->deleteScheduledRaces($event);
+            } else {
+                // Per-day regenerate: wipe only the targeted disciplines'
+                // races; other disciplines (other days) untouched.
+                $disciplineIds = $disciplines->pluck('id')->all();
+                RaceResult::whereIn('discipline_id', $disciplineIds)
+                    ->where('status', 'SCHEDULED')
+                    ->delete();
+            }
 
             foreach ($disciplines as $discipline) {
                 $this->generateForDiscipline($discipline, $event->lane_count, $defaultRounds, $result);
@@ -82,6 +107,54 @@ class ScheduleGeneratorService
         });
 
         return $result;
+    }
+
+    /**
+     * Date (YYYY-MM-DD) of the first ordered block whose filters match this
+     * discipline pre-generation. Returns null if no block matches.
+     */
+    private function primaryDayForDiscipline($discipline, array $orderedBlocks): ?string
+    {
+        foreach ($orderedBlocks as $block) {
+            if ($this->disciplineMatchesBlockPreGen($discipline, $block)) {
+                $day = $block->eventDay;
+                if (!$day) continue;
+                $date = $day->date instanceof \Carbon\Carbon
+                    ? $day->date->toDateString()
+                    : (string) $day->date;
+                return $date;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Pre-generation block match: same as the matchesBlock used during
+     * placement but skips the stage filter (we don't have race rows yet).
+     */
+    private function disciplineMatchesBlockPreGen($discipline, $block): bool
+    {
+        $gf = $block->gender_filter;
+        if (is_array($gf) && !empty($gf)) {
+            $map = ['M' => 'Open', 'W' => 'Women', 'X' => 'Mixed'];
+            $needles = array_map(fn($v) => $map[strtoupper((string) $v)] ?? $v, $gf);
+            if (!in_array($discipline->gender_group, $needles, true)) return false;
+        }
+        $df = $block->distance_filter;
+        if (is_array($df) && !empty($df)) {
+            $needles = array_values(array_filter(
+                array_map(fn($v) => preg_replace('/\D/', '', (string) $v), $df),
+                fn($v) => $v !== '',
+            ));
+            if (!in_array((string) $discipline->distance, $needles, true)) return false;
+        }
+        $cf = $block->competition_filter;
+        if (is_array($cf) && !empty($cf)) {
+            $c = strtolower((string) ($discipline->competition ?? ''));
+            $needles = array_map(fn($v) => strtolower((string) $v), $cf);
+            if (!in_array($c, $needles, true)) return false;
+        }
+        return true;
     }
 
     /**

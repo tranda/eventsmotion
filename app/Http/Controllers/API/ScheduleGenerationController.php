@@ -26,8 +26,11 @@ class ScheduleGenerationController extends BaseController
 
     /**
      * POST /api/events/{id}/schedule/generate
-     * Body: { clean?: bool } — clean=true wipes any preserved drag-edited
-     * ordering and rebuilds the schedule from scratch.
+     * Body:
+     *   { clean?: bool }            — wipes preserved drag-edits, rebuilds
+     *   { day?: "YYYY-MM-DD" }      — only regenerates disciplines whose
+     *                                 first matching block lands on that
+     *                                 day; other days are left alone.
      */
     public function generate(\Illuminate\Http\Request $request, $eventId)
     {
@@ -36,10 +39,15 @@ class ScheduleGenerationController extends BaseController
             return $this->sendError('Event not found', [], 404);
         }
 
-        $clean = $request->boolean('clean');
+        $data = $request->validate([
+            'clean' => 'sometimes|boolean',
+            'day' => 'sometimes|nullable|date_format:Y-m-d',
+        ]);
+        $clean = (bool) ($data['clean'] ?? false);
+        $day = $data['day'] ?? null;
 
         try {
-            $result = $this->generator->generate($event, clean: $clean);
+            $result = $this->generator->generate($event, clean: $clean, day: $day);
         } catch (InvalidArgumentException $e) {
             return $this->sendError($e->getMessage(), [], 422);
         } catch (Throwable $e) {
@@ -47,7 +55,10 @@ class ScheduleGenerationController extends BaseController
             return $this->sendError('Schedule generation failed.', [$e->getMessage()], 500);
         }
 
-        return $this->sendResponse($result->toArray(), 'Schedule generated.');
+        $message = $day
+            ? "Schedule generated for {$day}."
+            : 'Schedule generated.';
+        return $this->sendResponse($result->toArray(), $message);
     }
 
     /** POST /api/disciplines/{id}/schedule/regenerate */
