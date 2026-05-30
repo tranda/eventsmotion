@@ -3,6 +3,12 @@
 namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
+use League\CommonMark\CommonMarkConverter;
+use League\CommonMark\Extension\Table\TableExtension;
+use League\CommonMark\Environment\Environment;
+use League\CommonMark\Extension\CommonMark\CommonMarkCoreExtension;
+use League\CommonMark\MarkdownConverter;
+use Mpdf\Mpdf;
 
 /**
  * php artisan idbf:export-plans
@@ -12,8 +18,10 @@ use Illuminate\Console\Command;
  */
 class ExportRacePlansDoc extends Command
 {
-    protected $signature = 'idbf:export-plans {--out=docs/idbf/race-plans-summary.md}';
-    protected $description = 'Generate a markdown summary of every race plan from config/idbf_race_plans.php';
+    protected $signature = 'idbf:export-plans
+        {--out=docs/idbf/race-plans-summary.md}
+        {--pdf : Also emit a PDF next to the markdown file}';
+    protected $description = 'Generate a markdown (and optional PDF) summary of every race plan from config/idbf_race_plans.php';
 
     public function handle(): int
     {
@@ -23,14 +31,75 @@ class ExportRacePlansDoc extends Command
             return self::FAILURE;
         }
 
-        $out = $this->buildMarkdown($plans);
+        $md = $this->buildMarkdown($plans);
 
         $path = base_path((string) $this->option('out'));
         @mkdir(dirname($path), 0755, true);
-        file_put_contents($path, $out);
-
+        file_put_contents($path, $md);
         $this->info('Wrote ' . count($plans) . ' plan(s) to ' . $path);
+
+        if ($this->option('pdf')) {
+            $pdfPath = preg_replace('/\.md$/', '.pdf', $path);
+            if ($pdfPath === $path) {
+                $pdfPath = $path . '.pdf';
+            }
+            $this->writePdf($md, $pdfPath);
+            $this->info('Wrote PDF to ' . $pdfPath);
+        }
+
         return self::SUCCESS;
+    }
+
+    private function writePdf(string $markdown, string $pdfPath): void
+    {
+        // Markdown → HTML via CommonMark + GFM tables.
+        $env = new Environment();
+        $env->addExtension(new CommonMarkCoreExtension());
+        $env->addExtension(new TableExtension());
+        $converter = new MarkdownConverter($env);
+        $bodyHtml = (string) $converter->convert($markdown);
+
+        $css = <<<CSS
+            body { font-family: 'DejaVu Sans', sans-serif; font-size: 9.5pt; color: #1F2937; }
+            h1 { font-size: 18pt; color: #0D47A1; border-bottom: 2px solid #BBDEFB; padding-bottom: 4px; margin-top: 24px; }
+            h2 { font-size: 13pt; color: #1565C0; margin-top: 20px; }
+            h3 { font-size: 11pt; color: #1976D2; margin-top: 12px; margin-bottom: 4px; }
+            code { background: #F3F4F6; padding: 1px 4px; border-radius: 3px; font-family: 'DejaVu Sans Mono', monospace; font-size: 9pt; }
+            em { color: #6B7280; font-style: italic; }
+            ul { margin: 4px 0; padding-left: 20px; }
+            li { margin-bottom: 2px; }
+            hr { border: none; border-top: 1px solid #E5E7EB; margin: 20px 0; }
+            table { border-collapse: collapse; margin: 6px 0 12px 0; }
+            th, td { border: 1px solid #E5E7EB; padding: 4px 8px; font-size: 9pt; text-align: center; }
+            th { background: #E3F2FD; color: #0D47A1; font-weight: 600; }
+            td:first-child { background: #F9FAFB; text-align: left; }
+            /* Each major heading on its own page so plans don't split awkwardly. */
+            h2 { page-break-before: always; }
+            h2:first-of-type { page-break-before: avoid; }
+CSS;
+
+        $html = <<<HTML
+            <!DOCTYPE html>
+            <html><head><meta charset="UTF-8"><style>{$css}</style></head>
+            <body>{$bodyHtml}</body></html>
+HTML;
+
+        $tempDir = storage_path('app/mpdf');
+        if (!is_dir($tempDir)) {
+            @mkdir($tempDir, 0755, true);
+        }
+        $mpdf = new Mpdf([
+            'mode' => 'utf-8',
+            'format' => 'A4',
+            'orientation' => 'P',
+            'tempDir' => $tempDir,
+            'margin_left' => 14,
+            'margin_right' => 14,
+            'margin_top' => 14,
+            'margin_bottom' => 14,
+        ]);
+        $mpdf->WriteHTML($html);
+        file_put_contents($pdfPath, $mpdf->Output('', 'S'));
     }
 
     private function buildMarkdown(array $plans): string
