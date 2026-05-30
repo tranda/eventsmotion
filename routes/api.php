@@ -176,6 +176,7 @@ Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::get('events/{event}/schedule/export', [\App\Http\Controllers\API\ScheduleExportController::class, 'export']);
     Route::post('disciplines/{discipline}/schedule/regenerate', [ScheduleGenerationController::class, 'regenerateDiscipline']);
     Route::post('disciplines/{discipline}/schedule/seed-next-round', [ScheduleGenerationController::class, 'seedNextRound']);
+    Route::post('events/{event}/schedule/copy-day-order', [ScheduleGenerationController::class, 'copyDayOrder']);
     Route::post('events/{event}/schedule/publish', [ScheduleGenerationController::class, 'publish']);
     Route::post('events/{event}/schedule/unpublish', [ScheduleGenerationController::class, 'unpublish']);
     Route::post('events/{event}/schedule/shift', [ScheduleGenerationController::class, 'shift']);

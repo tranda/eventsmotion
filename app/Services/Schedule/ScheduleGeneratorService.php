@@ -110,6 +110,113 @@ class ScheduleGeneratorService
     }
 
     /**
+     * Reorder target-day races to match the sequence of source-day races,
+     * pairing by (boat_group, age_group, gender_group, stage) — i.e.
+     * everything except distance. After matching, re-times the target day
+     * via recomputeAllBlockTimes so the schedule lines up with the source
+     * day's pattern.
+     *
+     * - Pairing is FIFO on both sides: the Nth source race of a given key
+     *   claims the Nth target race of the same key.
+     * - Source races with no target match are skipped.
+     * - Target races with no source match are appended at the end (in
+     *   their existing order).
+     * - Breaks are not reordered; they keep their times and the recompute
+     *   pass slots races around them.
+     */
+    public function copyDayOrder(Event $event, string $sourceDay, string $targetDay): array
+    {
+        if ($sourceDay === $targetDay) {
+            throw new InvalidArgumentException('Source and target days must differ.');
+        }
+        $stats = ['matched' => 0, 'unmatched_source' => 0, 'unmatched_target' => 0];
+
+        $matchKey = fn($race) => strtolower(implode('|', [
+            (string) optional($race->discipline)->boat_group,
+            (string) optional($race->discipline)->age_group,
+            (string) optional($race->discipline)->gender_group,
+            (string) $race->stage,
+        ]));
+
+        DB::transaction(function () use ($event, $sourceDay, $targetDay, $matchKey, &$stats) {
+            $sourceStart = Carbon::parse("{$sourceDay} 00:00:00");
+            $sourceEnd = $sourceStart->copy()->addDay();
+            $targetStart = Carbon::parse("{$targetDay} 00:00:00");
+            $targetEnd = $targetStart->copy()->addDay();
+
+            $sourceRaces = RaceResult::whereHas(
+                'discipline',
+                fn($q) => $q->where('event_id', $event->id),
+            )
+                ->where('status', 'SCHEDULED')
+                ->whereNotNull('race_time')
+                ->whereBetween('race_time', [$sourceStart, $sourceEnd])
+                ->with('discipline')
+                ->orderBy('race_time')
+                ->orderBy('id')
+                ->get();
+
+            $targetRaces = RaceResult::whereHas(
+                'discipline',
+                fn($q) => $q->where('event_id', $event->id),
+            )
+                ->where('status', 'SCHEDULED')
+                ->whereNotNull('race_time')
+                ->whereBetween('race_time', [$targetStart, $targetEnd])
+                ->with('discipline')
+                ->orderBy('race_time')
+                ->orderBy('id')
+                ->get();
+
+            // Bucket target races by match key, FIFO queue per key.
+            $targetByKey = [];
+            foreach ($targetRaces as $r) {
+                $targetByKey[$matchKey($r)][] = $r;
+            }
+
+            // Walk source races in order; pull the first target race with a
+            // matching key. Stamp it with a temporary sort_time so the
+            // recompute pass can re-order them deterministically.
+            $base = Carbon::parse("{$targetDay} 00:00:00");
+            $orderedTargets = [];
+            $seenTargetIds = [];
+            $i = 0;
+            foreach ($sourceRaces as $src) {
+                $k = $matchKey($src);
+                if (empty($targetByKey[$k])) {
+                    $stats['unmatched_source']++;
+                    continue;
+                }
+                $tgt = array_shift($targetByKey[$k]);
+                $orderedTargets[] = $tgt;
+                $seenTargetIds[$tgt->id] = true;
+                // Use a fake monotonically-increasing time so the recompute
+                // step sorts them in this order. Real times come from the
+                // recompute (block.start + N*gap).
+                $tgt->race_time = $base->copy()->addSeconds($i * 60);
+                $tgt->save();
+                $stats['matched']++;
+                $i++;
+            }
+            // Append unmatched target races at the end, preserving their
+            // relative order from the original race_time sort.
+            foreach ($targetRaces as $r) {
+                if (isset($seenTargetIds[$r->id])) continue;
+                $r->race_time = $base->copy()->addSeconds($i * 60);
+                $r->save();
+                $stats['unmatched_target']++;
+                $i++;
+            }
+
+            // Recompute all block times so the day uses canonical
+            // block.start + N*gap slots (with breaks honoured).
+            $this->recomputeAllBlockTimes($event);
+        });
+
+        return $stats;
+    }
+
+    /**
      * Date (YYYY-MM-DD) of the first ordered block whose filters match this
      * discipline pre-generation. Returns null if no block matches.
      */

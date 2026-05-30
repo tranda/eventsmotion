@@ -81,6 +81,44 @@ class ScheduleGenerationController extends BaseController
         return $this->sendResponse($result->toArray(), 'Discipline schedule regenerated.');
     }
 
+    /**
+     * POST /api/events/{id}/schedule/copy-day-order
+     * Body: { source_day: 'YYYY-MM-DD', target_day: 'YYYY-MM-DD' }
+     *
+     * Reorders the target day's races to follow the source day's sequence,
+     * matching by (boat, age, gender, stage) — distance is intentionally
+     * ignored so "same races on different distances" line up. After
+     * reorder, the recompute step re-times the target day from
+     * block.start with the canonical gap.
+     */
+    public function copyDayOrder(\Illuminate\Http\Request $request, $eventId)
+    {
+        $event = Event::find($eventId);
+        if (!$event) {
+            return $this->sendError('Event not found', [], 404);
+        }
+        $data = $request->validate([
+            'source_day' => 'required|date_format:Y-m-d',
+            'target_day' => 'required|date_format:Y-m-d|different:source_day',
+        ]);
+        try {
+            $stats = $this->generator->copyDayOrder(
+                $event,
+                $data['source_day'],
+                $data['target_day'],
+            );
+        } catch (InvalidArgumentException $e) {
+            return $this->sendError($e->getMessage(), [], 422);
+        } catch (Throwable $e) {
+            \Log::error('Copy day order failed', ['event_id' => $eventId, 'error' => $e->getMessage()]);
+            return $this->sendError('Copy day order failed.', [$e->getMessage()], 500);
+        }
+        return $this->sendResponse(
+            $stats,
+            "Reordered {$stats['matched']} race(s) on {$data['target_day']} to follow {$data['source_day']}'s pattern.",
+        );
+    }
+
     /** POST /api/events/{id}/schedule/publish */
     public function publish($eventId)
     {
