@@ -257,9 +257,13 @@ class PublicController extends BaseController
                     ->header('Access-Control-Allow-Headers', 'Content-Type, Accept');
             }
 
-            // Get all races for the event regardless of status (same as authenticated API)
+            // Drafts stay hidden from the public — schedule_status='published'
+            // on the parent event is required. Admins preview drafts via the
+            // Schedule Builder's Grid tab (which uses the authenticated
+            // endpoint with include_drafts=1).
             try {
                 $raceResults = RaceResult::with(['discipline', 'crewResults.crew.team'])
+                    ->published()
                     ->forEvent($eventId)
                     ->orderBy('race_number', 'asc')
                     ->get();
@@ -267,6 +271,7 @@ class PublicController extends BaseController
                 \Log::error("Error loading race results with crews: " . $e->getMessage());
                 // Fallback to basic loading
                 $raceResults = RaceResult::with(['discipline', 'crewResults.crew'])
+                    ->published()
                     ->forEvent($eventId)
                     ->orderBy('race_number', 'asc')
                     ->get();
