@@ -127,14 +127,18 @@ class ProgressionDescriber
             return '';
         }
 
+        // Rounds plan: times sum across all rounds for placings. We look at
+        // the rounds actually scheduled in *this* discipline (not the plan's
+        // full stage list) because events can be configured to use fewer
+        // rounds than the plan defines (event.default_rounds). The LAST
+        // scheduled round is terminal — its time sum IS the final standings.
+        if ($plan->isRoundsPlan() && str_starts_with($stage, 'Round')) {
+            return $this->describeRound($stage, $races);
+        }
+
         // Terminal: last stage in the plan.
         if ($idx === count($stages) - 1) {
             return 'Final standings.';
-        }
-
-        // Rounds plan: times sum across all rounds for placings.
-        if ($plan->isRoundsPlan() && str_starts_with($stage, 'Round')) {
-            return $this->describeRound($stage, $stages, $races);
         }
 
         $sourceKey = $this->stageToSourceKey($stage);
@@ -191,14 +195,34 @@ class ProgressionDescriber
     }
 
     /**
-     * @param Collection<RaceResult> $races
+     * @param Collection<RaceResult> $races all scheduled races in this discipline
      */
-    private function describeRound(string $stage, array $stages, Collection $races): string
+    private function describeRound(string $stage, Collection $races): string
     {
-        $others = array_values(array_filter($stages, fn($s) => $s !== $stage));
+        // Collect round stages actually present in this discipline, sorted by
+        // round number. Treats whatever's last as the terminal round (its time
+        // sum is the final standings).
+        $roundStages = $races
+            ->pluck('stage')
+            ->filter(fn($s) => is_string($s) && str_starts_with($s, 'Round'))
+            ->unique()
+            ->sortBy(fn($s) => (int) preg_replace('/[^0-9]/', '', (string) $s))
+            ->values()
+            ->all();
+
+        if (empty($roundStages)) {
+            return '';
+        }
+
+        $isLast = $stage === end($roundStages);
+        if ($isLast) {
+            return 'Final standings (sum of all rounds).';
+        }
+
+        $others = array_values(array_filter($roundStages, fn($s) => $s !== $stage));
         $list = $this->resolveStageList($others, $races);
         if ($list === '') {
-            return 'Times will be summed across all rounds for final standings.';
+            return 'Time sums with the other rounds for final standings.';
         }
         return "Time sums with {$list} for final standings.";
     }
