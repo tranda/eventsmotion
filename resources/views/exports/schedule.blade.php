@@ -100,6 +100,15 @@
         table.crews tr.empty td.team {
             color: #9CA3AF;
         }
+        .progression {
+            margin-top: 4px;
+            padding: 2px 6px;
+            background: #F3F4F6;
+            border-left: 3px solid #1565C0;
+            font-size: 7.5pt;
+            color: #1F2937;
+            line-height: 1.3;
+        }
         .competition {
             display: inline-block;
             padding: 0 4px;
@@ -176,6 +185,9 @@
                                                 </tr>
                                             @endforeach
                                         </table>
+                                    @endif
+                                    @if(!empty($e['progression']))
+                                        <div class="progression">{{ $e['progression'] }}</div>
                                     @endif
                                 </td>
                                 <td class="stage">

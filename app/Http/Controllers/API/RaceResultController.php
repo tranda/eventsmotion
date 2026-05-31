@@ -3,17 +3,25 @@
 namespace App\Http\Controllers\API;
 
 use App\Http\Controllers\API\BaseController as BaseController;
-use Illuminate\Http\Request;
-use App\Models\RaceResult;
+use App\Models\Crew;
 use App\Models\CrewResult;
 use App\Models\Discipline;
-use App\Models\Crew;
+use App\Models\Event;
+use App\Models\RaceResult;
 use App\Models\Team;
+use App\Services\Schedule\ProgressionDescriber;
 use Carbon\Carbon;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class RaceResultController extends BaseController
 {
+    public function __construct(
+        private ?ProgressionDescriber $progressionDescriber = null,
+    ) {
+        // Container autowires when available; legacy entry-points (tests) tolerate null.
+    }
+
     /**
      * Get race results for a specific event.
      * Returns ALL races regardless of completion status.
@@ -73,8 +81,36 @@ class RaceResultController extends BaseController
                     ->get();
             }
             
+            // Compute the auto-derived "where do these crews go next" line
+            // for every scheduled race in the event. Returned as race_id => string.
+            // Falls back to the per-race override when the plan can't be resolved.
+            $progressionByRace = [];
+            if ($this->progressionDescriber) {
+                try {
+                    $byDiscipline = $raceResults
+                        ->filter(fn($r) => ($r->entry_type ?? 'race') === 'race' && $r->discipline_id)
+                        ->groupBy('discipline_id');
+                    $event = Event::find($eventId);
+                    $laneCount = (int) ($event->lane_count ?? 6);
+                    foreach ($byDiscipline as $disciplineRaces) {
+                        $discipline = $disciplineRaces->first()->discipline;
+                        if (!$discipline) continue;
+                        $msgs = $this->progressionDescriber->forDiscipline(
+                            $discipline,
+                            $disciplineRaces,
+                            $laneCount,
+                        );
+                        foreach ($msgs as $rid => $m) {
+                            $progressionByRace[$rid] = $m;
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    \Log::warning('Progression derivation failed: ' . $e->getMessage());
+                }
+            }
+
             // Enhance race results with final round information and crew results
-            $enhancedRaceResults = $raceResults->map(function($raceResult) {
+            $enhancedRaceResults = $raceResults->map(function($raceResult) use ($progressionByRace) {
                 // Get all crew results with final time calculations
                 $allCrewResults = $raceResult->crewResults()
                     ->with(['crew.team.club', 'crew.discipline'])
@@ -98,6 +134,7 @@ class RaceResultController extends BaseController
                 // Add additional computed properties
                 $raceResultArray['is_final_round'] = $raceResult->isFinalRound();
                 $raceResultArray['show_accumulated_time'] = $raceResult->shouldShowAccumulatedTime();
+                $raceResultArray['progression_rule'] = $progressionByRace[$raceResult->id] ?? '';
 
                 return $raceResultArray;
             });
@@ -213,7 +250,10 @@ class RaceResultController extends BaseController
                 'discipline_id' => 'sometimes|exists:disciplines,id',
                 'race_time' => 'nullable|date',
                 'stage' => 'sometimes|string|max:100',
-                'status' => 'sometimes|in:SCHEDULED,IN_PROGRESS,FINISHED,CANCELLED'
+                'status' => 'sometimes|in:SCHEDULED,IN_PROGRESS,FINISHED,CANCELLED',
+                // progression_note: empty/null clears the override and reverts
+                // to the auto-derived rule on the next GET.
+                'progression_note' => 'sometimes|nullable|string|max:500',
             ]);
 
             $raceResult->update($request->all());

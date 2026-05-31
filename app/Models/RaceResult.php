@@ -21,6 +21,7 @@ class RaceResult extends Model
         'duration_seconds',
         'label',
         'shift_subsequent',
+        'progression_note',
     ];
 
     protected $casts = [

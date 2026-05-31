@@ -5,6 +5,7 @@ namespace App\Http\Controllers\API;
 use App\Http\Controllers\API\BaseController as BaseController;
 use App\Models\Event;
 use App\Models\RaceResult;
+use App\Services\Schedule\ProgressionDescriber;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Mpdf\Mpdf;
@@ -21,6 +22,10 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  */
 class ScheduleExportController extends BaseController
 {
+    public function __construct(
+        private ProgressionDescriber $progressionDescriber,
+    ) {}
+
     public function export(Request $request, $eventId)
     {
         $event = Event::find($eventId);
@@ -153,6 +158,17 @@ class ScheduleExportController extends BaseController
         // badges (matching the Grid's visual style).
         $colorMap = is_array($event->color_map) ? $event->color_map : [];
 
+        // Auto-derived progression lines, keyed by race_id. We compute over
+        // the full event (not just the day filter) so cross-day refs like
+        // "→ Grand Final (#42)" still resolve when day= is set. Override
+        // notes on each race short-circuit the auto rule inside the service.
+        $progressionByRace = [];
+        try {
+            $progressionByRace = $this->progressionDescriber->forEvent($event);
+        } catch (\Throwable $e) {
+            \Log::warning('PDF progression derivation failed: ' . $e->getMessage());
+        }
+
         // Load every block with its day so we can pin each entry to one.
         $orderedBlocks = [];
         foreach ($event->eventDays()->with('blocks')->get()->sortBy('sort_order') as $eday) {
@@ -256,6 +272,7 @@ class ScheduleExportController extends BaseController
                 'stage_bg' => $stageBg,
                 'stage_fg' => $stageFg,
                 'crews' => $crews,
+                'progression' => $progressionByRace[$e->id] ?? '',
             ];
         }
 
