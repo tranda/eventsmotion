@@ -5,10 +5,15 @@ namespace App\Http\Controllers\API;
 use App\Http\Controllers\API\BaseController as BaseController;
 use App\Models\Event;
 use App\Models\RaceResult;
+use App\Services\Schedule\ProgressionDescriber;
 use Illuminate\Http\Request;
 
 class PublicController extends BaseController
 {
+    public function __construct(
+        private ?ProgressionDescriber $progressionDescriber = null,
+    ) {}
+
     /**
      * Get public race results for a specific event.
      * This endpoint doesn't require authentication and can be accessed by anyone.
@@ -267,8 +272,41 @@ class PublicController extends BaseController
                     ->get();
             }
 
+            // Auto-derived "where do these crews go next" line, keyed by
+            // race_id. Failures (missing service, bad data, etc.) leave the
+            // map empty so every race gets an empty progression_rule but the
+            // response itself is unaffected.
+            $progressionByRace = [];
+            if ($this->progressionDescriber) {
+                try {
+                    $event = Event::find($eventId);
+                    $laneCount = (int) ($event?->lane_count ?? 6);
+                    $byDiscipline = $raceResults
+                        ->filter(fn($r) => ($r->entry_type ?? 'race') === 'race' && $r->discipline_id)
+                        ->groupBy('discipline_id');
+                    foreach ($byDiscipline as $disciplineRaces) {
+                        try {
+                            $discipline = $disciplineRaces->first()->discipline;
+                            if (!$discipline) continue;
+                            $msgs = $this->progressionDescriber->forDiscipline(
+                                $discipline,
+                                $disciplineRaces,
+                                $laneCount,
+                            );
+                            foreach ($msgs as $rid => $m) {
+                                $progressionByRace[$rid] = $m;
+                            }
+                        } catch (\Throwable $inner) {
+                            \Log::warning('Public progression (discipline) failed: ' . $inner->getMessage());
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    \Log::warning('Public progression derivation failed: ' . $e->getMessage());
+                }
+            }
+
             // Enhance race results with final round information and crew results
-            $enhancedRaceResults = $raceResults->map(function($raceResult) {
+            $enhancedRaceResults = $raceResults->map(function($raceResult) use ($progressionByRace) {
                 try {
                     // Always add is_final_round flag for tracking
                     $isFinalRound = $raceResult->isFinalRound();
@@ -323,15 +361,23 @@ class PublicController extends BaseController
                             : 'null'
                     ]);
 
-                    return $raceResult;
-                } catch (\Exception $e) {
+                    // Convert to array (admin pattern) so we can attach
+                    // progression_rule without touching Eloquent's $appends
+                    // machinery. Catching Throwable below covers TypeError /
+                    // Error too — previously the inner catch was \Exception,
+                    // which let those slip through and crash the response.
+                    $arr = $raceResult->toArray();
+                    $arr['progression_rule'] = $progressionByRace[$raceResult->id] ?? '';
+                    return $arr;
+                } catch (\Throwable $e) {
                     \Log::error('Error enhancing race result', [
                         'race_id' => $raceResult->id,
                         'error' => $e->getMessage(),
                         'trace' => $e->getTraceAsString()
                     ]);
 
-                    // Return the original race result if enhancement fails
+                    // Fall back to the raw model so the response keeps its
+                    // shape even when one race's enhancement blows up.
                     return $raceResult;
                 }
             });
@@ -347,7 +393,16 @@ class PublicController extends BaseController
             ->header('Cache-Control', 'public, max-age=30')
 ;
 
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
+            // Catching Throwable (not just Exception) so PHP 7+ Errors
+            // — TypeError, undefined method, autoloader failures, etc. —
+            // surface as a proper 500 instead of crashing the worker and
+            // leaving the frontend with a silent empty response.
+            \Log::error('getPublicRaceResults failed', [
+                'event_id' => $request->query('event_id'),
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
             return $this->sendError('Error retrieving race results', [$e->getMessage()], 500)
                 ->header('Access-Control-Allow-Origin', '*')
                 ->header('Access-Control-Allow-Methods', 'GET, OPTIONS')
