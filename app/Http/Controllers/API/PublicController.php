@@ -258,21 +258,27 @@ class PublicController extends BaseController
             }
 
             // Drafts stay hidden from the public — schedule_status='published'
-            // on the parent event is required. Admins preview drafts via the
-            // Schedule Builder's Grid tab (which uses the authenticated
-            // endpoint with include_drafts=1).
+            // on the parent event is required. Admins (access_level >= 3) who
+            // pass a Sanctum bearer token bypass the filter so they can preview
+            // a draft on the live page; anonymous callers cannot.
+            $authUser = auth('sanctum')->user();
+            $isAdmin = $authUser && ($authUser->access_level ?? 0) >= 3;
+            $applyPublishedFilter = fn($q) => $isAdmin ? $q : $q->published();
+
             try {
-                $raceResults = RaceResult::with(['discipline', 'crewResults.crew.team'])
-                    ->published()
-                    ->forEvent($eventId)
+                $raceResults = $applyPublishedFilter(
+                    RaceResult::with(['discipline', 'crewResults.crew.team'])
+                        ->forEvent($eventId)
+                )
                     ->orderBy('race_number', 'asc')
                     ->get();
             } catch (\Exception $e) {
                 \Log::error("Error loading race results with crews: " . $e->getMessage());
                 // Fallback to basic loading
-                $raceResults = RaceResult::with(['discipline', 'crewResults.crew'])
-                    ->published()
-                    ->forEvent($eventId)
+                $raceResults = $applyPublishedFilter(
+                    RaceResult::with(['discipline', 'crewResults.crew'])
+                        ->forEvent($eventId)
+                )
                     ->orderBy('race_number', 'asc')
                     ->get();
             }
