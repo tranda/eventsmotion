@@ -6,6 +6,7 @@ use App\Http\Controllers\API\BaseController as BaseController;
 use App\Models\Event;
 use App\Models\EventDay;
 use App\Models\ScheduleBlock;
+use App\Services\Schedule\ScheduleGeneratorService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -15,6 +16,10 @@ use Illuminate\Support\Facades\DB;
  */
 class ScheduleConfigController extends BaseController
 {
+    public function __construct(
+        private ScheduleGeneratorService $generator,
+    ) {}
+
     /**
      * GET /api/events/{id}/schedule-config
      * Returns lane_count, schedule_status, and the nested days+blocks tree.
@@ -220,13 +225,31 @@ class ScheduleConfigController extends BaseController
     /** PUT /api/schedule-blocks/{id} */
     public function updateBlock(Request $request, $blockId)
     {
-        $block = ScheduleBlock::find($blockId);
+        $block = ScheduleBlock::with('eventDay.event')->find($blockId);
         if (!$block) {
             return $this->sendError('Schedule block not found', [], 404);
         }
 
         $validated = $this->validateBlock($request, false);
+
+        // If timing inputs change, the existing races in this block (and any
+        // downstream blocks on the same day) need their race_time recomputed
+        // from the new block.start + N*gap. Order is preserved — entries are
+        // re-sorted by current race_time, so manual reorderings stick.
+        $timingChanged =
+            (array_key_exists('start_time', $validated)
+                && (string) $validated['start_time'] !== (string) $block->start_time)
+            || (array_key_exists('gap_seconds', $validated)
+                && (int) $validated['gap_seconds'] !== (int) $block->gap_seconds);
+
         $block->update($validated);
+
+        if ($timingChanged) {
+            $event = $block->eventDay?->event;
+            if ($event) {
+                $this->generator->recomputeAllBlockTimes($event);
+            }
+        }
 
         return $this->sendResponse($block, 'Schedule block updated.');
     }
