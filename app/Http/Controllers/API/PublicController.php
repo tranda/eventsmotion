@@ -3,12 +3,17 @@
 namespace App\Http\Controllers\API;
 
 use App\Http\Controllers\API\BaseController as BaseController;
-use Illuminate\Http\Request;
-use App\Models\RaceResult;
 use App\Models\Event;
+use App\Models\RaceResult;
+use App\Services\Schedule\ProgressionDescriber;
+use Illuminate\Http\Request;
 
 class PublicController extends BaseController
 {
+    public function __construct(
+        private ?ProgressionDescriber $progressionDescriber = null,
+    ) {}
+
     /**
      * Get public race results for a specific event.
      * This endpoint doesn't require authentication and can be accessed by anyone.
@@ -267,9 +272,38 @@ class PublicController extends BaseController
                     ->get();
             }
 
-            // Enhance race results with final round information and crew results
-            $enhancedRaceResults = $raceResults->map(function($raceResult) {
+            // Auto-derived "where do these crews go next" line, keyed by
+            // race_id. Service falls back to the per-race override when set.
+            $progressionByRace = [];
+            if ($this->progressionDescriber) {
                 try {
+                    $byDiscipline = $raceResults
+                        ->filter(fn($r) => ($r->entry_type ?? 'race') === 'race' && $r->discipline_id)
+                        ->groupBy('discipline_id');
+                    $event = Event::find($eventId);
+                    $laneCount = (int) ($event->lane_count ?? 6);
+                    foreach ($byDiscipline as $disciplineRaces) {
+                        $discipline = $disciplineRaces->first()->discipline;
+                        if (!$discipline) continue;
+                        $msgs = $this->progressionDescriber->forDiscipline(
+                            $discipline,
+                            $disciplineRaces,
+                            $laneCount,
+                        );
+                        foreach ($msgs as $rid => $m) {
+                            $progressionByRace[$rid] = $m;
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    \Log::warning('Public progression derivation failed: ' . $e->getMessage());
+                }
+            }
+
+            // Enhance race results with final round information and crew results
+            $enhancedRaceResults = $raceResults->map(function($raceResult) use ($progressionByRace) {
+                try {
+                    $raceResult->setAttribute('progression_rule', $progressionByRace[$raceResult->id] ?? '');
+                    $raceResult->append('progression_rule');
                     // Always add is_final_round flag for tracking
                     $isFinalRound = $raceResult->isFinalRound();
                     $raceResult->is_final_round = $isFinalRound;
