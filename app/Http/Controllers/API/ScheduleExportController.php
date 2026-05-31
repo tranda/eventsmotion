@@ -42,20 +42,23 @@ class ScheduleExportController extends BaseController
         $eventName = $event->name ?? "event-{$event->id}";
         $slug = $this->slug($eventName);
         $dayTag = $day ? "_{$day}" : '';
+        // Race plan vs start list: when crews are included, the document is
+        // the printable handout for teams and should be named accordingly.
+        $kind = $includeCrews ? 'start-list' : 'race-plan';
 
         if ($format === 'csv') {
             $body = $this->buildCsv($entries, $laneCount, $includeCrews);
-            $filename = "schedule_{$slug}{$dayTag}.csv";
+            $filename = "{$kind}_{$slug}{$dayTag}.csv";
             return $this->streamed($body, $filename, 'text/csv; charset=UTF-8');
         }
         if ($format === 'pdf') {
             $body = $this->buildPdf($event, $entries, $day, $laneCount, $includeCrews);
-            $filename = "schedule_{$slug}{$dayTag}.pdf";
+            $filename = "{$kind}_{$slug}{$dayTag}.pdf";
             return $this->streamed($body, $filename, 'application/pdf');
         }
         if ($format === 'xlsx') {
             $body = $this->buildXlsx($entries, $laneCount, $includeCrews);
-            $filename = "schedule_{$slug}{$dayTag}.xlsx";
+            $filename = "{$kind}_{$slug}{$dayTag}.xlsx";
             return $this->streamed(
                 $body,
                 $filename,
@@ -63,7 +66,7 @@ class ScheduleExportController extends BaseController
             );
         }
         $body = $this->buildTxt($event, $entries, $day, $laneCount, $includeCrews);
-        $filename = "schedule_{$slug}{$dayTag}.txt";
+        $filename = "{$kind}_{$slug}{$dayTag}.txt";
         return $this->streamed($body, $filename, 'text/plain; charset=UTF-8');
     }
 
@@ -223,7 +226,7 @@ class ScheduleExportController extends BaseController
                 ? $this->competitionColor($competition)
                 : ['bg' => '#FFE0B2', 'fg' => '#5D4037', 'border' => '#FFB74D'];
 
-            $crewParts = [];
+            $crews = [];
             if ($includeCrews) {
                 $byLane = [];
                 foreach ($e->crewResults ?? [] as $cr) {
@@ -233,8 +236,10 @@ class ScheduleExportController extends BaseController
                 }
                 for ($i = 1; $i <= $laneCount; $i++) {
                     $cr = $byLane[$i] ?? null;
-                    $name = $cr?->crew?->team?->name ?? '—';
-                    $crewParts[] = "L{$i}: {$name}";
+                    $crews[] = [
+                        'lane' => $i,
+                        'name' => $cr?->crew?->team?->name ?? '—',
+                    ];
                 }
             }
 
@@ -250,7 +255,7 @@ class ScheduleExportController extends BaseController
                 'stage' => $e->stage ?? '',
                 'stage_bg' => $stageBg,
                 'stage_fg' => $stageFg,
-                'crew_line' => $includeCrews ? implode('   ', $crewParts) : '',
+                'crews' => $crews,
             ];
         }
 

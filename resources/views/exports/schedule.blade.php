@@ -77,11 +77,28 @@
             margin-right: 3px;
             white-space: nowrap;
         }
-        .crews {
-            margin-top: 3px;
-            font-size: 7.5pt;
-            color: #4B5563;
-            line-height: 1.3;
+        table.crews {
+            margin-top: 4px;
+            border-collapse: collapse;
+            font-size: 8pt;
+            color: #1F2937;
+        }
+        table.crews td {
+            padding: 1px 6px 1px 0;
+            border: none;
+            vertical-align: top;
+        }
+        table.crews td.lane {
+            color: #6B7280;
+            font-weight: 600;
+            width: 22pt;
+            white-space: nowrap;
+        }
+        table.crews td.team {
+            white-space: nowrap;
+        }
+        table.crews tr.empty td.team {
+            color: #9CA3AF;
         }
         .competition {
             display: inline-block;
@@ -150,8 +167,15 @@
                                     @if($e['competition'])
                                         <span class="competition" style="background: {{ $e['comp_bg'] }}; color: {{ $e['comp_fg'] }}; border-color: {{ $e['comp_border'] }};">{{ $e['competition'] }}</span>
                                     @endif
-                                    @if(!empty($e['crew_line']))
-                                        <div class="crews">{{ $e['crew_line'] }}</div>
+                                    @if(!empty($e['crews']))
+                                        <table class="crews">
+                                            @foreach($e['crews'] as $c)
+                                                <tr class="{{ $c['name'] === '—' ? 'empty' : '' }}">
+                                                    <td class="lane">L{{ $c['lane'] }}</td>
+                                                    <td class="team">{{ $c['name'] }}</td>
+                                                </tr>
+                                            @endforeach
+                                        </table>
                                     @endif
                                 </td>
                                 <td class="stage">
