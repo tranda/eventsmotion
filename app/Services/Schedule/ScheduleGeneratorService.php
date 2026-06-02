@@ -785,21 +785,43 @@ class ScheduleGeneratorService
             }
         }
 
-        $blocksById = [];
+        // Group ordered blocks by day so each day's blocks can chain by sort
+        // order. Block N+1's effective start is max(block.start_time,
+        // end-of-block-N) — one continuous timeline per day. Blocks keep
+        // their own start_time as a "not-before" hint; they never run earlier
+        // than configured, but the configured time stops mattering once the
+        // previous block has already pushed the cursor past it.
+        $blocksByDay = [];
         foreach ($orderedBlocks as $block) {
-            $blocksById[$block->id] = $block;
+            $day = $block->eventDay;
+            if (!$day) continue;
+            $dateStr = $day->date instanceof Carbon
+                ? $day->date->toDateString()
+                : (string) $day->date;
+            $blocksByDay[$dateStr][] = $block;
         }
 
-        DB::transaction(function () use ($bucketsByBlockId, $blocksById) {
-            foreach ($bucketsByBlockId as $blockId => $entries) {
-                $this->recomputeBlockEntryTimes($blocksById[$blockId], $entries);
+        DB::transaction(function () use ($bucketsByBlockId, $blocksByDay) {
+            foreach ($blocksByDay as $dateStr => $dayBlocks) {
+                /** @var Carbon|null $cursor */
+                $cursor = null;
+                foreach ($dayBlocks as $block) {
+                    $entries = $bucketsByBlockId[$block->id] ?? [];
+                    $cursor = $this->recomputeBlockEntryTimes($block, $entries, $dateStr, $cursor);
+                }
             }
         });
 
         $this->renumberRaces($event);
     }
 
-    private function recomputeBlockEntryTimes($block, array $entries): void
+    /**
+     * Lays out one block's entries from a starting cursor. Returns the cursor
+     * value after the last entry, so the caller can chain into the next block
+     * on the same day. The block's start_time is a "not-before" anchor —
+     * effective start is max(cursor, block.start_time).
+     */
+    private function recomputeBlockEntryTimes($block, array $entries, string $dateStr, ?Carbon $cursor): Carbon
     {
         usort($entries, function ($a, $b) {
             $ta = $a->race_time;
@@ -813,10 +835,8 @@ class ScheduleGeneratorService
             return $cmp !== 0 ? $cmp : (($a->id ?? 0) <=> ($b->id ?? 0));
         });
 
-        $dateStr = $block->eventDay->date instanceof Carbon
-            ? $block->eventDay->date->toDateString()
-            : (string) $block->eventDay->date;
-        $next = Carbon::parse($dateStr . ' ' . $block->start_time);
+        $blockStart = Carbon::parse($dateStr . ' ' . $block->start_time);
+        $next = ($cursor !== null && $cursor->gt($blockStart)) ? $cursor->copy() : $blockStart;
 
         foreach ($entries as $entry) {
             $entry->race_time = $next;
@@ -832,6 +852,8 @@ class ScheduleGeneratorService
                 $next = $next->copy()->addSeconds((int) $block->gap_seconds);
             }
         }
+
+        return $next;
     }
 
     /**
