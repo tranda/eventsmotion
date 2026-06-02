@@ -1787,8 +1787,14 @@ class RaceResultController extends BaseController
             }
 
             // Find the unique event(s) touched so we can renumber after writes.
+            // Race rows carry event_id via discipline; break rows carry it
+            // directly on race_results.event_id. If we only resolve via
+            // discipline, a break-only update produces an empty list and the
+            // recompute is skipped — which leaves the break sitting where
+            // the client put it without any block-level normalization, so
+            // dragging a break appears to do nothing after the page reloads.
             $eventIds = $races
-                ->map(fn($r) => $r->discipline?->event_id)
+                ->map(fn($r) => $r->discipline?->event_id ?? $r->event_id)
                 ->filter()
                 ->unique()
                 ->values();
