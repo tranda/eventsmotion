@@ -1358,7 +1358,8 @@ class RaceResultController extends BaseController
                 return $this->sendError('Event not found', [], 404);
             }
 
-            // Get all race results for the event with full relationships
+            // Get all race results for the event with full relationships.
+            // Skip break/ceremony entries — they have no discipline and crash the map below.
             $raceResults = RaceResult::with([
                 'discipline' => function($query) {
                     $query->select('id', 'event_id', 'boat_group', 'age_group', 'gender_group', 'distance');
@@ -1368,6 +1369,7 @@ class RaceResultController extends BaseController
                 }
             ])
             ->forEvent($eventId)
+            ->whereNotNull('discipline_id')
             ->orderBy('race_number', 'asc')
             ->get();
 
@@ -1386,8 +1388,8 @@ class RaceResultController extends BaseController
                 $lanes = $raceResult->crewResults->map(function ($crewResult) {
                     return [
                         'lane' => $crewResult->lane,
-                        'team' => $crewResult->crew->team->name ?? 'Unknown Team',
-                        'crew_id' => $crewResult->crew->id,
+                        'team' => $crewResult->crew?->team?->name ?? 'Unknown Team',
+                        'crew_id' => $crewResult->crew?->id,
                         'time' => $crewResult->time_ms ? CrewResult::formatTimeFromMs($crewResult->time_ms) : null,
                         'status' => $crewResult->status,
                         'position' => $crewResult->position
