@@ -370,49 +370,65 @@ class RaceResult extends Model
     }
 
     /**
-     * Get final accumulated times for all crews in this discipline.
+     * Get final times for all crews in this discipline, keyed by crew_id.
+     *
+     * For round-based plans (Round 1 + Round 2 + …), final_time_ms is the
+     * sum of all round times — every round counts toward the standing.
+     *
+     * For heat-based plans (Heat → Rep → Grand Final), the Grand Final time
+     * alone determines the standing. Heats and repechages are pure
+     * qualification; summing them across crews who took different paths
+     * (e.g. Heat→Final vs Heat→Rep→Final) is structurally unfair.
+     *
      * Returns a collection keyed by crew_id with final_time_ms and final_status.
      */
     public function getFinalTimesForDiscipline()
     {
-        // Get all race results for this discipline
-        $allRaceResults = RaceResult::where('discipline_id', $this->discipline_id)
-            ->with(['crewResults' => function($query) {
-                $query->whereNotNull('time_ms')->where('time_ms', '>', 0);
-            }])
-            ->get();
-
         $finalTimes = collect();
+        $isRoundBased = $this->shouldShowAccumulatedTime();
 
-        // Get all unique crew IDs that participated in any round
-        $allCrewIds = $allRaceResults->flatMap(function($raceResult) {
-            return $raceResult->crewResults->pluck('crew_id');
-        })->unique();
+        if ($isRoundBased) {
+            // Sum all rounds for every participating crew.
+            $allRaceResults = RaceResult::where('discipline_id', $this->discipline_id)
+                ->with(['crewResults' => function($query) {
+                    $query->whereNotNull('time_ms')->where('time_ms', '>', 0);
+                }])
+                ->get();
 
-        foreach ($allCrewIds as $crewId) {
-            $crewResults = $allRaceResults->flatMap(function($raceResult) use ($crewId) {
-                return $raceResult->crewResults->where('crew_id', $crewId);
-            });
+            $allCrewIds = $allRaceResults
+                ->flatMap(fn($r) => $r->crewResults->pluck('crew_id'))
+                ->unique();
 
-            // Check if any round has DSQ status
-            $hasDSQ = $crewResults->contains('status', 'DSQ');
+            foreach ($allCrewIds as $crewId) {
+                $crewResults = $allRaceResults->flatMap(
+                    fn($r) => $r->crewResults->where('crew_id', $crewId)
+                );
 
-            if ($hasDSQ) {
-                $finalTimes->put($crewId, [
-                    'final_time_ms' => null,
-                    'final_status' => 'DSQ'
-                ]);
-            } else {
-                // Calculate total time across all finished rounds
+                if ($crewResults->contains('status', 'DSQ')) {
+                    $finalTimes->put($crewId, ['final_time_ms' => null, 'final_status' => 'DSQ']);
+                    continue;
+                }
+
                 $finishedResults = $crewResults->where('status', 'FINISHED')
-                    ->whereNotNull('time_ms')
-                    ->where('time_ms', '>', 0);
-
+                    ->whereNotNull('time_ms')->where('time_ms', '>', 0);
                 if ($finishedResults->count() > 0) {
-                    $totalTimeMs = $finishedResults->sum('time_ms');
                     $finalTimes->put($crewId, [
-                        'final_time_ms' => $totalTimeMs,
-                        'final_status' => 'FINISHED'
+                        'final_time_ms' => $finishedResults->sum('time_ms'),
+                        'final_status' => 'FINISHED',
+                    ]);
+                }
+            }
+        } else {
+            // Heat-based plan: only the Grand Final time counts. Use the
+            // current race's crew results — we are by definition on the
+            // final race of the discipline.
+            foreach ($this->crewResults as $cr) {
+                if ($cr->status === 'DSQ') {
+                    $finalTimes->put($cr->crew_id, ['final_time_ms' => null, 'final_status' => 'DSQ']);
+                } elseif ($cr->status === 'FINISHED' && $cr->time_ms && $cr->time_ms > 0) {
+                    $finalTimes->put($cr->crew_id, [
+                        'final_time_ms' => $cr->time_ms,
+                        'final_status' => 'FINISHED',
                     ]);
                 }
             }
