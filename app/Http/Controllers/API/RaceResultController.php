@@ -920,13 +920,19 @@ class RaceResultController extends BaseController
             }
         }
         
-        // Remove crew results for lanes that are no longer in the sheet
+        // Remove crew results for lanes that are no longer in the sheet.
+        // Empty currentLanes means "clear all" — whereNotIn with [] is a
+        // no-op in Laravel, so handle the wipe explicitly.
         $currentLanes = array_keys(array_filter($lanes, function($lane) {
             return is_string($lane) ? !empty($lane) : !empty($lane['team'] ?? '');
         }));
-        CrewResult::where('race_result_id', $raceResult->id)
-            ->whereNotIn('lane', $currentLanes)
-            ->delete();
+        if (empty($currentLanes)) {
+            CrewResult::where('race_result_id', $raceResult->id)->delete();
+        } else {
+            CrewResult::where('race_result_id', $raceResult->id)
+                ->whereNotIn('lane', $currentLanes)
+                ->delete();
+        }
             
         // Auto-calculate positions if times were updated
         if ($hasTimeUpdates) {
@@ -1628,8 +1634,11 @@ class RaceResultController extends BaseController
                     $raceResult->update($updateData);
                 }
 
-                // Update crew assignments/results if provided
-                if (!empty($lanes)) {
+                // Update crew assignments/results if the lanes key was sent.
+                // Passing lanes={} explicitly clears all crew_results for the
+                // race (used by mock-data rollback to undo progression-driven
+                // assignments where there was no prior lane state to restore).
+                if ($request->has('lanes')) {
                     $this->updateCrewAssignments($raceResult, $lanes);
                 }
 
