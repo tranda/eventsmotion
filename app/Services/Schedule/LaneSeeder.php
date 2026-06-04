@@ -105,11 +105,20 @@ class LaneSeeder
 
             $rankings = $this->buildRankings($discipline, $plan, $sources);
 
-            DB::transaction(function () use ($stageRaces, $seedingMap, $rankings, $result, $stageName) {
+            // The seeding map has one row per stage instance (Rep 1, Rep 2, …).
+            // Stage names like "Repechage 2" carry their row index in the suffix;
+            // single-row stages (Grand/Minor/Tail Final) have no suffix and use
+            // row 1.
+            $stageRowBase = 1;
+            if (preg_match('/\s+(\d+)\s*$/', $stageName, $m)) {
+                $stageRowBase = (int) $m[1];
+            }
+
+            DB::transaction(function () use ($stageRaces, $seedingMap, $rankings, $result, $stageName, $stageRowBase) {
                 // For multi-race stages (e.g. Semi 1, Semi 2), each race gets its own seeding row.
                 $races = $stageRaces->values();
                 foreach ($races as $i => $race) {
-                    $rowKey = $i + 1; // 1-indexed within the stage type
+                    $rowKey = $stageRowBase + $i;
                     $laneToRef = $this->seedingRowForRaceIndex($seedingMap, $rowKey);
                     foreach ($laneToRef as $lane => $ref) {
                         if ($ref === null) continue;
