@@ -1488,17 +1488,23 @@ class RaceResultController extends BaseController
                 // Build discipline info string
                 $disciplineInfo = "{$boatSize}, {$ageGroup}, {$discipline->gender_group} {$discipline->distance}";
 
-                // Get crew/lane assignments
-                $lanes = $raceResult->crewResults->map(function ($crewResult) {
-                    return [
-                        'lane' => $crewResult->lane,
-                        'team' => $crewResult->crew?->team?->name ?? 'Unknown Team',
-                        'crew_id' => $crewResult->crew?->id,
-                        'time' => $crewResult->time_ms ? CrewResult::formatTimeFromMs($crewResult->time_ms) : null,
-                        'status' => $crewResult->status,
-                        'position' => $crewResult->position
-                    ];
-                })->values()->toArray();
+                // Get crew/lane assignments. Skip crews without a lane (e.g.
+                // lanes cleared in the admin grid) or without a resolvable crew
+                // id — they have no lane to time, and emitting a null lane/crew
+                // breaks strict clients (TimeKeeper) that expect integers,
+                // failing the whole event's plan decode.
+                $lanes = $raceResult->crewResults
+                    ->filter(fn($cr) => $cr->lane !== null && $cr->crew?->id !== null)
+                    ->map(function ($crewResult) {
+                        return [
+                            'lane' => $crewResult->lane,
+                            'team' => $crewResult->crew?->team?->name ?? 'Unknown Team',
+                            'crew_id' => $crewResult->crew?->id,
+                            'time' => $crewResult->time_ms ? CrewResult::formatTimeFromMs($crewResult->time_ms) : null,
+                            'status' => $crewResult->status,
+                            'position' => $crewResult->position
+                        ];
+                    })->values()->toArray();
 
                 return [
                     'id' => $raceResult->id,
