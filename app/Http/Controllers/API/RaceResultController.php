@@ -118,23 +118,53 @@ class RaceResultController extends BaseController
                     ->with(['crew.team.club', 'crew.discipline'])
                     ->get();
 
+                // Final-round enrichment: when this race is the chronologically
+                // last race in its discipline (or a Grand Final / Final), attach
+                // each crew's accumulated time + final status — same data the
+                // public endpoint already exposes for Race Results. Without this
+                // the Grid's lane badge falls back to the per-race time and
+                // never shows the summed result.
+                $isFinalRound = $raceResult->isFinalRound();
+                $finalTimesByCrew = collect();
+                if ($isFinalRound) {
+                    try {
+                        $finalTimesByCrew = $raceResult->getFinalTimesForDiscipline();
+                    } catch (\Throwable $e) {
+                        \Log::warning('Final-times enrichment failed: ' . $e->getMessage(), [
+                            'race_id' => $raceResult->id,
+                        ]);
+                    }
+                }
+
                 // Convert to array for proper JSON serialization
                 $raceResultArray = $raceResult->toArray();
 
                 // Add enhanced crew results (convert each item to array)
                 // allCrewResults returns mixed objects, so we need to handle them properly
-                $raceResultArray['crew_results'] = $allCrewResults->map(function($crewResult) {
+                $raceResultArray['crew_results'] = $allCrewResults->map(function($crewResult) use ($isFinalRound, $finalTimesByCrew) {
                     // Handle both Eloquent models and stdClass objects
                     if ($crewResult instanceof \Illuminate\Database\Eloquent\Model) {
-                        return $crewResult->toArray();
+                        $arr = $crewResult->toArray();
                     } else {
                         // For stdClass objects, cast to array
-                        return (array) $crewResult;
+                        $arr = (array) $crewResult;
                     }
+                    if ($isFinalRound) {
+                        $crewId = $arr['crew_id'] ?? null;
+                        $final = $crewId !== null ? $finalTimesByCrew->get($crewId) : null;
+                        $arr['final_time_ms'] = $final['final_time_ms'] ?? null;
+                        $arr['final_status'] = $final['final_status'] ?? null;
+                        $arr['is_final_round'] = true;
+                    } else {
+                        $arr['final_time_ms'] = null;
+                        $arr['final_status'] = null;
+                        $arr['is_final_round'] = false;
+                    }
+                    return $arr;
                 })->values()->toArray();
 
                 // Add additional computed properties
-                $raceResultArray['is_final_round'] = $raceResult->isFinalRound();
+                $raceResultArray['is_final_round'] = $isFinalRound;
                 $raceResultArray['show_accumulated_time'] = $raceResult->shouldShowAccumulatedTime();
                 $raceResultArray['progression_rule'] = $progressionByRace[$raceResult->id] ?? '';
 
