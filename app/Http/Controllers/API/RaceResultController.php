@@ -1726,6 +1726,14 @@ class RaceResultController extends BaseController
 
                 \DB::commit();
 
+                // Mirror storeCrewResults: the TimeKeeper "SEND RESULTS" flow
+                // comes through here, so without this only the admin web path
+                // auto-progressed. Once every crew has a terminal status, mark
+                // the race FINISHED and seed the next un-seeded stage
+                // (Repechage/Final). Idempotent and guarded — no-op if crews
+                // aren't all terminal or the stage is already seeded.
+                $this->maybeAdvanceStageProgression($raceResult->fresh());
+
                 // Reload with relationships for response
                 $raceResult->load(['discipline', 'crewResults.crew.team']);
 
