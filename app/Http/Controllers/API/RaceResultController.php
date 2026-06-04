@@ -1449,7 +1449,7 @@ class RaceResultController extends BaseController
             // Skip break/ceremony entries — they have no discipline and crash the map below.
             $raceResults = RaceResult::with([
                 'discipline' => function($query) {
-                    $query->select('id', 'event_id', 'boat_group', 'age_group', 'gender_group', 'distance');
+                    $query->select('id', 'event_id', 'boat_group', 'age_group', 'gender_group', 'distance', 'competition');
                 },
                 'crewResults.crew.team' => function($query) {
                     $query->select('id', 'name', 'club_id');
@@ -1490,6 +1490,7 @@ class RaceResultController extends BaseController
                     'discipline_id' => $raceResult->discipline_id,
                     'discipline_info' => $disciplineInfo,
                     'boat_size' => $boatSize,
+                    'competition' => $discipline->competition,
                     'race_time' => $raceResult->race_time ? $raceResult->race_time->toDateTimeString() : null,
                     'status' => $raceResult->status,
                     'lanes' => $lanes,
