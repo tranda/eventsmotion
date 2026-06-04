@@ -305,6 +305,14 @@ class ScheduleExportController extends BaseController
 
     private function loadEntries(Event $event, ?string $day)
     {
+        // Mirror the Grid (RaceResultController@index): show every race for an
+        // active discipline plus all breaks, regardless of the race's own
+        // status. We deliberately do NOT filter on status='SCHEDULED' — races
+        // that have already run (or sit in any non-SCHEDULED state) still
+        // appear in the on-screen Grid, so the export must include them too,
+        // otherwise the first races of a day go missing from the document.
+        // whereNotNull('race_time') stays: this is a time-ordered schedule and
+        // an un-timed race can't be slotted onto the timeline.
         $query = RaceResult::where(function ($q) use ($event) {
             $q->whereHas('discipline', fn($qq) => $qq
                 ->where('event_id', $event->id)
@@ -314,7 +322,6 @@ class ScheduleExportController extends BaseController
                      ->where('entry_type', 'break');
               });
         })
-            ->where('status', 'SCHEDULED')
             ->whereNotNull('race_time')
             ->with(['discipline', 'crewResults.crew.team.club']);
 
