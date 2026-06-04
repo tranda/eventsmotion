@@ -9,6 +9,7 @@ use App\Models\Discipline;
 use App\Models\Event;
 use App\Models\RaceResult;
 use App\Models\Team;
+use App\Services\Schedule\LaneSeeder;
 use App\Services\Schedule\ProgressionDescriber;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -18,6 +19,7 @@ class RaceResultController extends BaseController
 {
     public function __construct(
         private ?ProgressionDescriber $progressionDescriber = null,
+        private ?LaneSeeder $laneSeeder = null,
     ) {
         // Container autowires when available; legacy entry-points (tests) tolerate null.
     }
@@ -446,6 +448,13 @@ class RaceResultController extends BaseController
             // Auto-calculate positions based on race times
             $this->calculatePositions($raceResultId);
 
+            // If every crew in this race now has a terminal status (FINISHED/
+            // DNS/DNF/DSQ), mark the race itself FINISHED and try to seed the
+            // next stage of the discipline. Idempotent: LaneSeeder skips stages
+            // whose sources aren't fully finished, and stages that are already
+            // seeded.
+            $this->maybeAdvanceStageProgression($raceResult->fresh());
+
             // Reload crew results with updated positions
             $updatedCrewResults = CrewResult::where('race_result_id', $raceResultId)
                 ->with(['crew.team'])
@@ -462,6 +471,48 @@ class RaceResultController extends BaseController
             return $this->sendError('Validation error', $e->errors(), 422);
         } catch (\Exception $e) {
             return $this->sendError('Error saving crew results', [$e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Mark the race FINISHED when all its crews have a terminal status, then
+     * ask LaneSeeder to fill the next un-seeded stage of the discipline.
+     *
+     * Never throws — wraps everything because auto-progression is a "nice to
+     * have" on top of result entry. If the plan can't be resolved or some
+     * source race isn't finished yet, LaneSeeder just returns a "skipped"
+     * result and we log it.
+     */
+    private function maybeAdvanceStageProgression(?RaceResult $race): void
+    {
+        if (!$race || !$race->discipline_id) return;
+        try {
+            $crewResults = CrewResult::where('race_result_id', $race->id)->get();
+            if ($crewResults->isEmpty()) return;
+            $terminal = ['FINISHED', 'DNS', 'DNF', 'DSQ'];
+            $allTerminal = $crewResults->every(fn($cr) => in_array($cr->status, $terminal, true));
+            if (!$allTerminal) return;
+
+            if ($race->status !== 'FINISHED') {
+                $race->status = 'FINISHED';
+                $race->save();
+            }
+
+            if (!$this->laneSeeder) return;
+            $discipline = Discipline::with('event')->find($race->discipline_id);
+            if (!$discipline) return;
+            $result = $this->laneSeeder->seedNextRound($discipline);
+            \Log::info('Auto-progression after crew-results save', [
+                'race_id' => $race->id,
+                'discipline_id' => $discipline->id,
+                'seeded_stage' => $result->seededStage,
+                'skipped' => $result->skipped,
+                'reason' => $result->skippedReason,
+            ]);
+        } catch (\Throwable $e) {
+            \Log::warning('Auto-progression failed: ' . $e->getMessage(), [
+                'race_id' => $race->id,
+            ]);
         }
     }
 
