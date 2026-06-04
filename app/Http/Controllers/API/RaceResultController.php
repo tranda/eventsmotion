@@ -531,13 +531,30 @@ class RaceResultController extends BaseController
             if (!$this->laneSeeder) return;
             $discipline = Discipline::with('event')->find($race->discipline_id);
             if (!$discipline) return;
-            $result = $this->laneSeeder->seedNextRound($discipline);
-            \Log::info('Auto-progression after crew-results save', [
+
+            // seedNextRound fills ONE stage per call and returns. When a round
+            // finishes, several stages can be ready at once (e.g. Repechage 1
+            // AND Repechage 2 are both seeded from the heats). Loop until a call
+            // seeds nothing new so every currently-ready stage gets filled.
+            // Stages whose sources aren't finished yet (e.g. a Grand Final fed
+            // by the repechages) are skipped and seed later, when those finish.
+            // Bounded purely as an infinite-loop backstop — a discipline never
+            // has anywhere near this many progression stages.
+            $seededStages = [];
+            $stopReason = null;
+            for ($i = 0; $i < 12; $i++) {
+                $result = $this->laneSeeder->seedNextRound($discipline);
+                if ($result->skipped || !$result->seededStage) {
+                    $stopReason = $result->skippedReason;
+                    break;
+                }
+                $seededStages[] = $result->seededStage;
+            }
+            \Log::info('Auto-progression after results save', [
                 'race_id' => $race->id,
                 'discipline_id' => $discipline->id,
-                'seeded_stage' => $result->seededStage,
-                'skipped' => $result->skipped,
-                'reason' => $result->skippedReason,
+                'seeded_stages' => $seededStages,
+                'stop_reason' => $stopReason,
             ]);
         } catch (\Throwable $e) {
             \Log::warning('Auto-progression failed: ' . $e->getMessage(), [
