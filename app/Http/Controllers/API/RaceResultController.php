@@ -334,6 +334,56 @@ class RaceResultController extends BaseController
     }
 
     /**
+     * Clear the seeded crews from a progression race (Repechage / Semi / Final),
+     * leaving it empty so it can be re-seeded fresh. Deletes the race's
+     * crew_results and resets its status to SCHEDULED.
+     *
+     * Heats / Rounds are rejected — they hold registered crews and must be
+     * re-seeded via discipline regeneration, not cleared here.
+     *
+     * @param int $raceResultId
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function clearCrewResults($raceResultId)
+    {
+        try {
+            $raceResult = RaceResult::find($raceResultId);
+            if (!$raceResult) {
+                return $this->sendError('Race result not found', [], 404);
+            }
+
+            $stage = strtolower(trim($raceResult->stage ?? ''));
+            $isProgression = !str_starts_with($stage, 'heat')
+                && !str_starts_with($stage, 'round')
+                && (str_contains($stage, 'repechage')
+                    || str_contains($stage, 'semi')
+                    || str_contains($stage, 'final'));
+
+            if (!$isProgression) {
+                return $this->sendError(
+                    'Only repechage, semi-final or final stages can have their seeds cleared.',
+                    [],
+                    422
+                );
+            }
+
+            $cleared = CrewResult::where('race_result_id', $raceResult->id)->delete();
+            if ($raceResult->status !== 'SCHEDULED') {
+                $raceResult->update(['status' => 'SCHEDULED']);
+            }
+
+            return $this->sendResponse([
+                'race_id' => $raceResult->id,
+                'stage' => $raceResult->stage,
+                'cleared' => $cleared,
+            ], 'Seeds cleared.');
+
+        } catch (\Exception $e) {
+            return $this->sendError('Error clearing seeds', [$e->getMessage()], 500);
+        }
+    }
+
+    /**
      * Get crew results for a specific race.
      * Includes ALL registered crews, even those without results.
      * For final rounds, includes accumulated times and final rankings.

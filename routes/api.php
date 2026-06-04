@@ -147,6 +147,7 @@ Route::middleware('auth:sanctum')->post('race-results/reorder', [RaceResultContr
 Route::middleware('auth:sanctum')->delete('race-results/{id}', [RaceResultController::class, 'destroy']);
 Route::middleware('auth:sanctum')->get('race-results/{raceResultId}/crew-results', [RaceResultController::class, 'getCrewResults']);
 Route::middleware('auth:sanctum')->post('race-results/{raceResultId}/crew-results', [RaceResultController::class, 'storeCrewResults']);
+Route::middleware('auth:sanctum')->delete('race-results/{raceResultId}/crew-results', [RaceResultController::class, 'clearCrewResults']);
 Route::middleware('auth:sanctum')->post('race-results/{raceResultId}/recalculate-positions', [RaceResultController::class, 'recalculatePositions']);
 
 // Schedule Builder (admin only)
