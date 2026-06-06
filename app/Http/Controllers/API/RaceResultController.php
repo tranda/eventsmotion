@@ -1000,6 +1000,18 @@ class RaceResultController extends BaseController
         $hasTimeUpdates = false;
 
         foreach ($lanes as $laneNumber => $laneData) {
+            // Defend against 0-indexed lane keys from upstream callers
+            // (Google Sheets sync was the original source of lane=0 rows that
+            // then disappeared from the Grid, which filters by lane >= 1).
+            $laneInt = (int) $laneNumber;
+            if ($laneInt < 1) {
+                \Log::warning('updateCrewAssignments: skipping non-positive lane', [
+                    'race_id' => $raceResult->id,
+                    'lane_key' => $laneNumber,
+                ]);
+                continue;
+            }
+
             // Handle both old format (string) and new format (object with team/time)
             if (is_string($laneData)) {
                 $teamName = $laneData;
@@ -1015,7 +1027,7 @@ class RaceResultController extends BaseController
 
                 if ($crew) {
                     $updateData = [
-                        'lane' => (int)$laneNumber,
+                        'lane' => $laneInt,
                         'time_ms' => null,      // Explicitly clear time by default
                         'position' => null,     // Clear position by default
                         'status' => null        // Default to null (registered but not finished)
