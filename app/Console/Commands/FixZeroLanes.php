@@ -34,71 +34,109 @@ class FixZeroLanes extends Command
 
         $this->info($dryRun ? 'DRY RUN — no changes will be saved.' : 'LIVE — changes will be saved.');
 
-        $query = CrewResult::where('lane', 0)
-            ->with(['raceResult.discipline.event'])
-            ->orderBy('id');
+        // Find every race that has at least one crew_result with lane=0,
+        // then operate per-race so we can pick the best strategy.
+        $raceIdsQuery = CrewResult::where('lane', 0)
+            ->whereNotNull('race_result_id')
+            ->with(['raceResult.discipline']);
 
         if ($eventId !== null) {
-            $query->whereHas('raceResult.discipline', fn($q) => $q->where('event_id', $eventId));
+            $raceIdsQuery->whereHas('raceResult.discipline', fn($q) => $q->where('event_id', $eventId));
         }
 
-        $offenders = $query->get();
-        if ($offenders->isEmpty()) {
+        $raceIds = $raceIdsQuery->pluck('race_result_id')->unique()->values();
+        if ($raceIds->isEmpty()) {
             $this->info('No crew_results with lane = 0 found.');
             return self::SUCCESS;
         }
 
-        $this->info("Found {$offenders->count()} crew_results with lane = 0.");
+        $this->info("Affected races: {$raceIds->count()}.");
 
-        $fixed = 0;
-        $orphans = 0;
-        $skippedNoEvent = 0;
+        $stats = ['shifted' => 0, 'reassigned' => 0, 'skipped' => 0];
 
-        foreach ($offenders as $cr) {
-            $race = $cr->raceResult;
-            if (!$race) {
-                $this->warn("  skip cr#{$cr->id}: race_result not found");
-                $orphans++;
-                continue;
-            }
+        foreach ($raceIds as $raceId) {
+            $race = \App\Models\RaceResult::with('discipline.event')->find($raceId);
+            if (!$race) continue;
             $event = $race->discipline?->event ?? ($race->event_id ? Event::find($race->event_id) : null);
             if (!$event) {
-                $this->warn("  skip cr#{$cr->id}: cannot resolve event for race {$race->id}");
-                $skippedNoEvent++;
+                $this->warn("  race {$raceId}: cannot resolve event, skipping");
+                $stats['skipped']++;
                 continue;
             }
             $laneCount = (int) ($event->lane_count ?? 6);
 
-            $taken = CrewResult::where('race_result_id', $race->id)
-                ->where('id', '!=', $cr->id)
+            $crews = CrewResult::where('race_result_id', $raceId)
                 ->whereNotNull('lane')
-                ->pluck('lane')
-                ->map(fn($l) => (int) $l)
-                ->all();
+                ->orderBy('lane')
+                ->orderBy('id')
+                ->get();
 
-            $freeLane = null;
-            for ($l = 1; $l <= $laneCount; $l++) {
-                if (!in_array($l, $taken, true)) {
-                    $freeLane = $l;
-                    break;
+            $lanes = $crews->pluck('lane')->map(fn($l) => (int) $l)->all();
+            $maxLane = empty($lanes) ? 0 : max($lanes);
+            $hasDuplicates = count($lanes) !== count(array_unique($lanes));
+
+            // Strategy 1 — shift +1 the whole race. Safe iff:
+            //   - the current lanes are all distinct (no duplicates),
+            //   - the highest lane after shift fits within lane_count.
+            // This matches the Google Sheets origin where columns were
+            // 0-indexed: shifting every row by +1 reconstructs the
+            // intended 1..N lane mapping and preserves relative order.
+            if (!$hasDuplicates && $maxLane + 1 <= $laneCount) {
+                $this->line("  race {$raceId} (#{$race->race_number}, {$race->stage}): shift +1 [" . implode(',', $lanes) . " → " . implode(',', array_map(fn($l) => $l + 1, $lanes)) . "]");
+                if (!$dryRun) {
+                    \Illuminate\Support\Facades\DB::transaction(function () use ($crews) {
+                        // Two-pass to avoid unique-constraint collisions on
+                        // (race_result_id, lane) if one exists: negate first,
+                        // then assign the final positive values.
+                        foreach ($crews as $cr) {
+                            $cr->lane = -((int) $cr->lane + 1);
+                            $cr->save();
+                        }
+                        foreach ($crews as $cr) {
+                            $cr->lane = abs((int) $cr->lane);
+                            $cr->save();
+                        }
+                    });
                 }
-            }
-
-            $teamName = $cr->crew?->team?->name ?? '(no team)';
-            if ($freeLane === null) {
-                $this->warn("  skip cr#{$cr->id} ({$teamName}) in race {$race->id}: no free lane (lanes 1..{$laneCount} all taken)");
+                $stats['shifted']++;
                 continue;
             }
 
-            $this->line("  cr#{$cr->id} ({$teamName}) race {$race->id} (#{$race->race_number}): lane 0 → {$freeLane}");
-            if (!$dryRun) {
-                $cr->lane = $freeLane;
-                $cr->save();
+            // Strategy 2 — fallback. Shift not safe (duplicates, or a crew
+            // already on the last lane). Move each lane=0 row individually
+            // to the first free lane.
+            $taken = $crews->where('lane', '!=', 0)->pluck('lane')->map(fn($l) => (int) $l)->all();
+            $zeroes = $crews->where('lane', 0);
+            $movedAny = false;
+            foreach ($zeroes as $cr) {
+                $freeLane = null;
+                for ($l = 1; $l <= $laneCount; $l++) {
+                    if (!in_array($l, $taken, true)) {
+                        $freeLane = $l;
+                        break;
+                    }
+                }
+                $teamName = $cr->crew?->team?->name ?? '(no team)';
+                if ($freeLane === null) {
+                    $this->warn("  race {$raceId}: no free lane for cr#{$cr->id} ({$teamName}) — lanes 1..{$laneCount} all taken");
+                    continue;
+                }
+                $this->line("  race {$raceId} (#{$race->race_number}): cr#{$cr->id} ({$teamName}) lane 0 → {$freeLane}");
+                if (!$dryRun) {
+                    $cr->lane = $freeLane;
+                    $cr->save();
+                }
+                $taken[] = $freeLane;
+                $movedAny = true;
             }
-            $fixed++;
+            if ($movedAny) {
+                $stats['reassigned']++;
+            } else {
+                $stats['skipped']++;
+            }
         }
 
-        $this->info("Done — fixed: {$fixed}, orphans: {$orphans}, missing event: {$skippedNoEvent}.");
+        $this->info("Done — shifted: {$stats['shifted']}, reassigned-individually: {$stats['reassigned']}, skipped: {$stats['skipped']}.");
         if ($dryRun) {
             $this->comment('Re-run without --dry-run to apply.');
         }
