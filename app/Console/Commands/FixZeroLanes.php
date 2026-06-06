@@ -82,7 +82,8 @@ class FixZeroLanes extends Command
             // 0-indexed: shifting every row by +1 reconstructs the
             // intended 1..N lane mapping and preserves relative order.
             if (!$hasDuplicates && $maxLane + 1 <= $laneCount) {
-                $this->line("  race {$raceId} (#{$race->race_number}, {$race->stage}): shift +1 [" . implode(',', $lanes) . " → " . implode(',', array_map(fn($l) => $l + 1, $lanes)) . "]");
+                $eventLabel = "event {$event->id}" . ($event->name ? " '{$event->name}'" : '');
+                $this->line("  race {$raceId} (#{$race->race_number}, {$race->stage}) [{$eventLabel}]: shift +1 [" . implode(',', $lanes) . " → " . implode(',', array_map(fn($l) => $l + 1, $lanes)) . "]");
                 if (!$dryRun) {
                     \Illuminate\Support\Facades\DB::transaction(function () use ($crews) {
                         // Two-pass to avoid unique-constraint collisions on
@@ -121,7 +122,8 @@ class FixZeroLanes extends Command
                     $this->warn("  race {$raceId}: no free lane for cr#{$cr->id} ({$teamName}) — lanes 1..{$laneCount} all taken");
                     continue;
                 }
-                $this->line("  race {$raceId} (#{$race->race_number}): cr#{$cr->id} ({$teamName}) lane 0 → {$freeLane}");
+                $eventLabel = "event {$event->id}" . ($event->name ? " '{$event->name}'" : '');
+                $this->line("  race {$raceId} (#{$race->race_number}) [{$eventLabel}]: cr#{$cr->id} ({$teamName}) lane 0 → {$freeLane}");
                 if (!$dryRun) {
                     $cr->lane = $freeLane;
                     $cr->save();
