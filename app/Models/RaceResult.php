@@ -388,12 +388,18 @@ class RaceResult extends Model
         $isRoundBased = $this->shouldShowAccumulatedTime();
 
         if ($isRoundBased) {
-            // Sum all rounds for every participating crew.
+            // Sum all rounds for every participating crew. Per IDBF rules,
+            // a crew has to FINISH every round to be ranked — any DNS/DNF/DSQ
+            // along the way disqualifies them from accumulated standings.
+            // We deliberately do NOT filter the eager load by time_ms here:
+            // we need the non-FINISHED rows so we can detect them. The old
+            // filter let DNS/DNF crews skip the check and get ranked by
+            // just their FINISHED round(s), which produced false-leader bugs
+            // (a single 50.000 round outranking crews that did both rounds).
             $allRaceResults = RaceResult::where('discipline_id', $this->discipline_id)
-                ->with(['crewResults' => function($query) {
-                    $query->whereNotNull('time_ms')->where('time_ms', '>', 0);
-                }])
+                ->with('crewResults')
                 ->get();
+            $totalRounds = $allRaceResults->count();
 
             $allCrewIds = $allRaceResults
                 ->flatMap(fn($r) => $r->crewResults->pluck('crew_id'))
@@ -404,14 +410,22 @@ class RaceResult extends Model
                     fn($r) => $r->crewResults->where('crew_id', $crewId)
                 );
 
-                if ($crewResults->contains('status', 'DSQ')) {
-                    $finalTimes->put($crewId, ['final_time_ms' => null, 'final_status' => 'DSQ']);
-                    continue;
+                // Worst-status wins: DSQ > DNF > DNS. Any of them → final
+                // = that status, no time.
+                foreach (['DSQ', 'DNF', 'DNS'] as $terminal) {
+                    if ($crewResults->contains('status', $terminal)) {
+                        $finalTimes->put($crewId, ['final_time_ms' => null, 'final_status' => $terminal]);
+                        continue 2;
+                    }
                 }
 
+                // Otherwise: must be FINISHED with a positive time in every
+                // round of the discipline to count. Missing a round (no row
+                // at all) or sitting on a null status means incomplete data
+                // — leave out of finalTimes so they don't get ranked.
                 $finishedResults = $crewResults->where('status', 'FINISHED')
                     ->whereNotNull('time_ms')->where('time_ms', '>', 0);
-                if ($finishedResults->count() > 0) {
+                if ($totalRounds > 0 && $finishedResults->count() === $totalRounds) {
                     $finalTimes->put($crewId, [
                         'final_time_ms' => $finishedResults->sum('time_ms'),
                         'final_status' => 'FINISHED',
