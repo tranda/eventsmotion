@@ -60,12 +60,22 @@ class RaceResultController extends BaseController
                   ->orWhereHas('discipline', fn($d) => $d->where('status', 'active'));
             });
 
+            // Grid is the source of truth: it iterates lanes 1..N and only
+            // renders crews that sit on a lane. Filter the eager load the
+            // same way so other consumers (Race Results, exports, progression)
+            // never see the lane=null / lane=0 ghost rows that auto-fill /
+            // re-seed / legacy Sheets data leave behind.
+            $crewLaneFilter = fn($q) => $q->whereNotNull('lane')->where('lane', '>', 0);
+
             // Get all races for the event regardless of completion status
             try {
                 $raceResults = $activeDisciplineFilter(
                     $applyPublishedFilter(
-                        RaceResult::with(['discipline', 'crewResults.crew.team.club'])
-                            ->forEvent($eventId)
+                        RaceResult::with([
+                            'discipline',
+                            'crewResults' => $crewLaneFilter,
+                            'crewResults.crew.team.club',
+                        ])->forEvent($eventId)
                     )
                 )
                     ->orderBy('race_number', 'asc')
@@ -75,8 +85,11 @@ class RaceResultController extends BaseController
                 // Fallback to basic loading
                 $raceResults = $activeDisciplineFilter(
                     $applyPublishedFilter(
-                        RaceResult::with(['discipline', 'crewResults.crew'])
-                            ->forEvent($eventId)
+                        RaceResult::with([
+                            'discipline',
+                            'crewResults' => $crewLaneFilter,
+                            'crewResults.crew',
+                        ])->forEvent($eventId)
                     )
                 )
                     ->orderBy('race_number', 'asc')
@@ -113,8 +126,13 @@ class RaceResultController extends BaseController
 
             // Enhance race results with final round information and crew results
             $enhancedRaceResults = $raceResults->map(function($raceResult) use ($progressionByRace) {
-                // Get all crew results with final time calculations
+                // Get all crew results with final time calculations. Apply the
+                // same lane-set filter as the outer eager-load so this fresh
+                // fetch doesn't re-introduce the ghost rows the controller is
+                // trying to hide.
                 $allCrewResults = $raceResult->crewResults()
+                    ->whereNotNull('lane')
+                    ->where('lane', '>', 0)
                     ->with(['crew.team.club', 'crew.discipline'])
                     ->get();
 

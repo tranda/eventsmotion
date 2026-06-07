@@ -265,10 +265,22 @@ class PublicController extends BaseController
             $isAdmin = $authUser && ($authUser->access_level ?? 0) >= 3;
             $applyPublishedFilter = fn($q) => $isAdmin ? $q : $q->published();
 
+            // Filter out crew_results with no lane assignment. The Schedule
+            // Builder Grid is the source of truth — it iterates lanes 1..N
+            // and only shows a crew if a row exists for that lane. Public
+            // Race Results used to render the raw collection, exposing the
+            // "ghost" rows that auto-fill / re-seed leave behind with
+            // lane=null (and the legacy lane=0). Mirror the Grid filter on
+            // the backend so all consumers see the same set.
+            $crewLaneFilter = fn($q) => $q->whereNotNull('lane')->where('lane', '>', 0);
+
             try {
                 $raceResults = $applyPublishedFilter(
-                    RaceResult::with(['discipline', 'crewResults.crew.team'])
-                        ->forEvent($eventId)
+                    RaceResult::with([
+                        'discipline',
+                        'crewResults' => $crewLaneFilter,
+                        'crewResults.crew.team.club',
+                    ])->forEvent($eventId)
                 )
                     ->orderBy('race_number', 'asc')
                     ->get();
@@ -276,8 +288,11 @@ class PublicController extends BaseController
                 \Log::error("Error loading race results with crews: " . $e->getMessage());
                 // Fallback to basic loading
                 $raceResults = $applyPublishedFilter(
-                    RaceResult::with(['discipline', 'crewResults.crew'])
-                        ->forEvent($eventId)
+                    RaceResult::with([
+                        'discipline',
+                        'crewResults' => $crewLaneFilter,
+                        'crewResults.crew',
+                    ])->forEvent($eventId)
                 )
                     ->orderBy('race_number', 'asc')
                     ->get();
