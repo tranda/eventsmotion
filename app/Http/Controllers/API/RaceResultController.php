@@ -129,12 +129,18 @@ class RaceResultController extends BaseController
                 // Get all crew results with final time calculations. Apply the
                 // same lane-set filter as the outer eager-load so this fresh
                 // fetch doesn't re-introduce the ghost rows the controller is
-                // trying to hide.
+                // trying to hide, then dedupe per lane keeping the highest-id
+                // row (matches the Grid's "last-write-wins" map behaviour
+                // for duplicate-lane assignments).
                 $allCrewResults = $raceResult->crewResults()
                     ->whereNotNull('lane')
                     ->where('lane', '>', 0)
+                    ->orderBy('id')
                     ->with(['crew.team.club', 'crew.discipline'])
-                    ->get();
+                    ->get()
+                    ->groupBy('lane')
+                    ->map(fn($g) => $g->sortByDesc('id')->first())
+                    ->values();
 
                 // Final-round enrichment: when this race is the chronologically
                 // last race in its discipline (or a Grand Final / Final), attach

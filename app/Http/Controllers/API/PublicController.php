@@ -265,14 +265,17 @@ class PublicController extends BaseController
             $isAdmin = $authUser && ($authUser->access_level ?? 0) >= 3;
             $applyPublishedFilter = fn($q) => $isAdmin ? $q : $q->published();
 
-            // Filter out crew_results with no lane assignment. The Schedule
-            // Builder Grid is the source of truth — it iterates lanes 1..N
-            // and only shows a crew if a row exists for that lane. Public
-            // Race Results used to render the raw collection, exposing the
-            // "ghost" rows that auto-fill / re-seed leave behind with
-            // lane=null (and the legacy lane=0). Mirror the Grid filter on
-            // the backend so all consumers see the same set.
-            $crewLaneFilter = fn($q) => $q->whereNotNull('lane')->where('lane', '>', 0);
+            // Filter + dedupe crew_results so Race Results sees exactly what
+            // the Schedule Builder Grid renders. The Grid iterates lanes 1..N
+            // and assigns crewByLane[lane] = cr while walking the list —
+            // the LAST crew_result for each lane wins. Mirror that here so
+            // duplicate-lane rows (auto-fill / re-seed leaves the old one
+            // around when a re-assignment lands on the same lane) collapse
+            // to the same single row the Grid shows.
+            $crewLaneFilter = fn($q) => $q
+                ->whereNotNull('lane')
+                ->where('lane', '>', 0)
+                ->orderBy('id'); // ascending — the highest-id wins via the dedupe pass below
 
             try {
                 $raceResults = $applyPublishedFilter(
@@ -296,6 +299,18 @@ class PublicController extends BaseController
                 )
                     ->orderBy('race_number', 'asc')
                     ->get();
+            }
+
+            // Dedupe per lane — same "last-write-wins" rule as the Grid's
+            // crewByLane map. Picks the highest-id crew_result per lane and
+            // drops the rest (typically older orphans from a re-assignment).
+            foreach ($raceResults as $rr) {
+                if (!$rr->relationLoaded('crewResults')) continue;
+                $deduped = $rr->crewResults
+                    ->groupBy('lane')
+                    ->map(fn($g) => $g->sortByDesc('id')->first())
+                    ->values();
+                $rr->setRelation('crewResults', $deduped);
             }
 
             // Auto-derived "where do these crews go next" line, keyed by
