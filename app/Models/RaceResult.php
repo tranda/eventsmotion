@@ -264,23 +264,15 @@ class RaceResult extends Model
         $finalStages = ['Grand Final', 'Final'];
         $isExactFinalStage = in_array($this->stage, $finalStages, true);
 
-        // Gate the "final round" flag on the race actually being done. While
-        // crews are still racing (any crew_result has null status), don't
-        // expose the final-standings view yet — the consumer would otherwise
-        // render an early "leaderboard" off the few crews that have crossed.
-        // Once every assigned crew has a terminal status (FINISHED/DNS/DNF/
-        // DSQ), the flag flips on and accumulated standings appear.
         if ($isExactFinalStage) {
-            $complete = $this->isRaceComplete();
             \Log::info('🏁 Final round determination - exact stage match', [
                 'race_id' => $this->id,
                 'stage' => $this->stage,
                 'discipline_id' => $this->discipline_id,
-                'is_final' => $complete,
-                'race_complete' => $complete,
+                'is_final' => true,
                 'reason' => 'exact_stage_match'
             ]);
-            return $complete;
+            return true;
         }
 
         // Second check: Exclude stages that should never be considered final
@@ -306,7 +298,6 @@ class RaceResult extends Model
 
         // Third check: Is this the highest race number in the discipline?
         $isHighestRaceNumber = $this->isHighestRaceNumberInDiscipline();
-        $complete = $isHighestRaceNumber && $this->isRaceComplete();
 
         \Log::info('🏁 Final round determination', [
             'race_id' => $this->id,
@@ -316,32 +307,11 @@ class RaceResult extends Model
             'is_exact_final_stage' => $isExactFinalStage,
             'is_excluded_stage' => $isExcludedStage,
             'is_highest_race_number' => $isHighestRaceNumber,
-            'race_complete' => $isHighestRaceNumber ? $this->isRaceComplete() : null,
-            'is_final' => $complete,
-            'reason' => $complete ? 'highest_race_number_complete' : ($isHighestRaceNumber ? 'awaiting_final_results' : 'not_final')
+            'is_final' => $isHighestRaceNumber,
+            'reason' => $isHighestRaceNumber ? 'highest_race_number' : 'not_final'
         ]);
 
-        return $complete;
-    }
-
-    /**
-     * Every crew_result assigned to this race has a terminal status
-     * (FINISHED / DNS / DNF / DSQ). Used to delay revealing accumulated
-     * final standings until the race is actually decided.
-     */
-    private function isRaceComplete(): bool
-    {
-        $crewResults = $this->crewResults;
-        if ($crewResults === null || $crewResults->isEmpty()) {
-            return false;
-        }
-        $terminal = ['FINISHED', 'DNS', 'DNF', 'DSQ'];
-        foreach ($crewResults as $cr) {
-            if (!in_array($cr->status, $terminal, true)) {
-                return false;
-            }
-        }
-        return true;
+        return $isHighestRaceNumber;
     }
 
     /**
@@ -386,16 +356,7 @@ class RaceResult extends Model
         }
 
         // Second check: It must be the chronologically last round (highest race number)
-        if (!$this->isHighestRaceNumberInDiscipline()) {
-            return false;
-        }
-
-        // Third check: don't reveal the accumulated standings until THIS round
-        // is actually done. While crews are still racing (any crew_result has
-        // null status), keep showing per-race times like an ordinary round —
-        // otherwise the early entries would create a misleading "leaderboard"
-        // before everyone has crossed the line.
-        return $this->isRaceComplete();
+        return $this->isHighestRaceNumberInDiscipline();
     }
 
     /**
