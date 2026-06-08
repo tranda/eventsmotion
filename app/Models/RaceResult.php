@@ -260,6 +260,13 @@ class RaceResult extends Model
      */
     public function isFinalRound()
     {
+        // Cancelled races never count as the final round — the standings
+        // collapse to the highest non-cancelled stage (handled below via
+        // isHighestRaceNumberInDiscipline, which skips CANCELLED).
+        if ($this->status === 'CANCELLED') {
+            return false;
+        }
+
         // First check: Exact stage name matches for "Final" and "Grand Final"
         $finalStages = ['Grand Final', 'Final'];
         $isExactFinalStage = in_array($this->stage, $finalStages, true);
