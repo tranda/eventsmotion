@@ -242,6 +242,42 @@ class ScheduleExportController extends BaseController
                 ? $this->competitionColor($competition)
                 : ['bg' => '#FFE0B2', 'fg' => '#5D4037', 'border' => '#FFB74D'];
 
+            // Mirror the Grid / Race Results flags so the blade can render
+            // a MEDALS badge on the race that decides medals and a
+            // CANCELLED badge on dropped races. isFinalRound already
+            // returns false for cancelled rows on the backend, so the two
+            // are mutually exclusive.
+            $isCancelled = $e->status === 'CANCELLED';
+            $isFinalRound = !$isCancelled && $e->isFinalRound();
+            // For Rounds-plan final standings the per-race position is by
+            // single-race time and is NOT the medal rank — medals are by
+            // sum across rounds. Pull final times and sort them so the
+            // position circle shows the actual medal rank, matching what
+            // the Flutter Grid does in _calculateFinalPositions.
+            $finalRankByCrewId = [];
+            if ($isFinalRound && $e->shouldShowAccumulatedTime()) {
+                try {
+                    $finalTimes = $e->getFinalTimesForDiscipline()
+                        ->filter(fn($v) => ($v['final_status'] ?? null) === 'FINISHED' && ($v['final_time_ms'] ?? null) !== null)
+                        ->sortBy(fn($v) => $v['final_time_ms'])
+                        ->values();
+                    foreach ($finalTimes as $idx => $row) {
+                        // collection key is crew_id when it came from getFinalTimesForDiscipline
+                    }
+                    // Re-derive ranks keyed by crew_id (sortBy on a keyed
+                    // collection preserves keys — we want crew_id => rank).
+                    $sorted = $e->getFinalTimesForDiscipline()
+                        ->filter(fn($v) => ($v['final_status'] ?? null) === 'FINISHED' && ($v['final_time_ms'] ?? null) !== null)
+                        ->sortBy(fn($v) => $v['final_time_ms']);
+                    $rank = 1;
+                    foreach ($sorted as $crewId => $_) {
+                        $finalRankByCrewId[$crewId] = $rank++;
+                    }
+                } catch (\Throwable $err) {
+                    \Log::warning('PDF final-rank computation failed: ' . $err->getMessage());
+                }
+            }
+
             $crews = [];
             if ($includeCrews) {
                 $byLane = [];
@@ -252,9 +288,18 @@ class ScheduleExportController extends BaseController
                 }
                 for ($i = 1; $i <= $laneCount; $i++) {
                     $cr = $byLane[$i] ?? null;
+                    $position = $cr?->position;
+                    // For Rounds-plan medal races, overwrite per-race position
+                    // with the accumulated-time rank so the PDF awards medals
+                    // by the sum, not by this round's time alone.
+                    if ($cr && !empty($finalRankByCrewId) && isset($finalRankByCrewId[$cr->crew_id])) {
+                        $position = $finalRankByCrewId[$cr->crew_id];
+                    }
                     $crews[] = [
                         'lane' => $i,
                         'name' => $cr?->crew?->team?->name ?? '—',
+                        'position' => $position,
+                        'status' => $cr?->status,
                     ];
                 }
             }
@@ -271,6 +316,8 @@ class ScheduleExportController extends BaseController
                 'stage' => $e->stage ?? '',
                 'stage_bg' => $stageBg,
                 'stage_fg' => $stageFg,
+                'is_cancelled' => $isCancelled,
+                'is_final_round' => $isFinalRound,
                 'crews' => $crews,
                 'progression' => $progressionByRace[$e->id] ?? '',
             ];

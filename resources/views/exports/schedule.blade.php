@@ -94,10 +94,53 @@
             width: 22pt;
             white-space: nowrap;
         }
+        /* Position circle — same style as the on-screen Grid / Race Results.
+           Hollow (coloured border + coloured text) for non-medal races so
+           the lane number reads as just "running order". Filled with the
+           position colour (gold/silver/bronze/blue) for the medal race. */
+        table.crews td.pos {
+            width: 22pt;
+            white-space: nowrap;
+            vertical-align: middle;
+        }
+        .poscircle {
+            display: inline-block;
+            width: 16pt;
+            height: 16pt;
+            line-height: 14pt;
+            border-radius: 8pt;
+            text-align: center;
+            font-weight: bold;
+            font-size: 9pt;
+            border-width: 1.5pt;
+            border-style: solid;
+        }
         table.crews td.team {
             white-space: nowrap;
         }
         table.crews tr.empty td.team {
+            color: #9CA3AF;
+        }
+        /* MEDALS / CANCELLED race-row badges */
+        .race-flag {
+            display: inline-block;
+            padding: 0 5px;
+            border-radius: 3px;
+            font-size: 7pt;
+            font-weight: bold;
+            margin-right: 4px;
+            vertical-align: middle;
+            white-space: nowrap;
+        }
+        .race-flag-medals {
+            background: #FBBF24;
+            color: #5D4037;
+        }
+        .race-flag-cancelled {
+            background: #7F1D1D;
+            color: #FFFFFF;
+        }
+        tr.race-cancelled td {
             color: #9CA3AF;
         }
         .progression {
@@ -166,7 +209,19 @@
                                 </td>
                             </tr>
                         @else
-                            <tr>
+                            @php
+                                // Position colour palette — matches the Flutter UI:
+                                //   1 gold, 2 silver-grey, 3 bronze, 4+ blue.
+                                $posColor = function ($pos) {
+                                    return match ((int) $pos) {
+                                        1 => '#FBBF24',   // amber-400 — gold
+                                        2 => '#9CA3AF',   // grey-400 — silver
+                                        3 => '#92400E',   // amber-900 — bronze
+                                        default => '#2563EB', // blue-600
+                                    };
+                                };
+                            @endphp
+                            <tr class="{{ $e['is_cancelled'] ? 'race-cancelled' : '' }}">
                                 <td class="num">{{ $e['race_number'] ?: '—' }}</td>
                                 <td class="time">{{ $e['time'] }}</td>
                                 <td class="discipline">
@@ -179,7 +234,27 @@
                                     @if(!empty($e['crews']))
                                         <table class="crews">
                                             @foreach($e['crews'] as $c)
+                                                @php
+                                                    $hasResult = !empty($c['position']);
+                                                    if ($hasResult) {
+                                                        $color = $posColor($c['position']);
+                                                        if ($e['is_final_round']) {
+                                                            // Medal race: filled circle.
+                                                            $circleStyle = "background: {$color}; border-color: {$color}; color: #FFFFFF;";
+                                                            $circleLabel = $c['position'];
+                                                        } else {
+                                                            // Non-medal race: hollow circle, coloured number.
+                                                            $circleStyle = "background: #FFFFFF; border-color: {$color}; color: {$color};";
+                                                            $circleLabel = $c['position'];
+                                                        }
+                                                    } else {
+                                                        // No result yet — show lane number, neutral grey hollow.
+                                                        $circleStyle = "background: #FFFFFF; border-color: #D1D5DB; color: #6B7280;";
+                                                        $circleLabel = $c['lane'];
+                                                    }
+                                                @endphp
                                                 <tr class="{{ $c['name'] === '—' ? 'empty' : '' }}">
+                                                    <td class="pos"><span class="poscircle" style="{{ $circleStyle }}">{{ $circleLabel }}</span></td>
                                                     <td class="lane">L{{ $c['lane'] }}</td>
                                                     <td class="team">{{ $c['name'] }}</td>
                                                 </tr>
@@ -191,6 +266,11 @@
                                     @endif
                                 </td>
                                 <td class="stage">
+                                    @if($e['is_cancelled'])
+                                        <span class="race-flag race-flag-cancelled">CANCELLED</span>
+                                    @elseif($e['is_final_round'])
+                                        <span class="race-flag race-flag-medals">MEDALS</span>
+                                    @endif
                                     <span class="badge" style="background: {{ $e['stage_bg'] }}; color: {{ $e['stage_fg'] }};">{{ $e['stage'] }}</span>
                                 </td>
                             </tr>
