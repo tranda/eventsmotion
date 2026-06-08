@@ -322,8 +322,12 @@ class RaceResult extends Model
      */
     public function isHighestRaceNumberInDiscipline()
     {
-        // Get the highest race number for this discipline
+        // Get the highest race number for this discipline, ignoring CANCELLED
+        // races. If the last round of a Rounds plan is cancelled by the jury,
+        // the previous round becomes the "highest" — that's the one whose
+        // results should drive the final standings.
         $highestRaceNumber = RaceResult::where('discipline_id', $this->discipline_id)
+            ->where('status', '!=', 'CANCELLED')
             ->max('race_number');
 
         // If there's no other race or this race has the highest number, it could be final
@@ -396,7 +400,11 @@ class RaceResult extends Model
             // filter let DNS/DNF crews skip the check and get ranked by
             // just their FINISHED round(s), which produced false-leader bugs
             // (a single 50.000 round outranking crews that did both rounds).
+            //
+            // CANCELLED races are excluded entirely — if Round 2 is called off
+            // by the jury, final standings collapse to Round 1 alone.
             $allRaceResults = RaceResult::where('discipline_id', $this->discipline_id)
+                ->where('status', '!=', 'CANCELLED')
                 ->with('crewResults')
                 ->get();
             $totalRounds = $allRaceResults->count();
