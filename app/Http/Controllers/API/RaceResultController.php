@@ -789,10 +789,17 @@ class RaceResultController extends BaseController
                     })
                     ->pluck('id');
 
+                // SAFETY: never auto-cancel a race that has recorded times. Only
+                // races with no real results (empty/scheduled) can be cancelled
+                // for being absent from the sheet — protects timed races from a
+                // partial or wrong sheet push.
                 $cancelledCount = RaceResult::whereIn('discipline_id', $scopedDisciplineIds)
                     ->whereNotIn('id', $processedRaceIds)
                     ->where('status', '!=', 'FINISHED')
                     ->where('status', '!=', 'CANCELLED')
+                    ->whereDoesntHave('crewResults', function($q) {
+                        $q->where('time_ms', '>', 0);
+                    })
                     ->update(['status' => 'CANCELLED']);
 
                 \DB::commit();
@@ -1210,6 +1217,18 @@ class RaceResultController extends BaseController
         $deletedCrewResultsCount = 0;
 
         foreach ($orphanedRaces as $race) {
+            // SAFETY: never delete a race that has recorded times. A partial or
+            // wrong sheet must not wipe real results — leave such races in place.
+            if ($race->crewResults()->where('time_ms', '>', 0)->count() > 0) {
+                \Log::warning('Skipping delete of orphaned race with recorded times', [
+                    'race_id' => $race->id,
+                    'race_number' => $race->race_number,
+                    'stage' => $race->stage,
+                    'discipline_id' => $disciplineId,
+                ]);
+                continue;
+            }
+
             // Count crew results before deletion for logging
             $crewResultsCount = $race->crewResults()->count();
             $deletedCrewResultsCount += $crewResultsCount;
@@ -1277,6 +1296,16 @@ class RaceResultController extends BaseController
         $deletedCrewResultsCount = 0;
 
         foreach ($orphanedRaces as $race) {
+            // SAFETY: never delete a race that has recorded times.
+            if ($race->crewResults()->where('time_ms', '>', 0)->count() > 0) {
+                \Log::warning('Skipping delete of orphaned race with recorded times (event-wide)', [
+                    'race_id' => $race->id,
+                    'race_number' => $race->race_number,
+                    'event_id' => $eventId,
+                ]);
+                continue;
+            }
+
             // Count crew results before deletion for logging
             $crewResultsCount = $race->crewResults()->count();
             $deletedCrewResultsCount += $crewResultsCount;
