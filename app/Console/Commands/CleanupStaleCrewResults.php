@@ -16,7 +16,7 @@ class CleanupStaleCrewResults extends Command
      *
      * @var string
      */
-    protected $signature = 'crew-results:cleanup {--dry-run : Show what would be cleaned without making changes} {--race-number= : Clean specific race number only} {--team= : Clean specific team only}';
+    protected $signature = 'crew-results:cleanup {--dry-run : Show what would be cleaned without making changes} {--race-number= : Clean specific race number only} {--team= : Clean specific team only} {--event= : Clean only races belonging to this event id}';
 
     /**
      * The console command description.
@@ -35,9 +35,15 @@ class CleanupStaleCrewResults extends Command
         $dryRun = $this->option('dry-run');
         $raceNumber = $this->option('race-number');
         $teamName = $this->option('team');
+        $eventId = $this->option('event');
 
         $this->info('Starting crew results cleanup...');
         $this->info($dryRun ? 'DRY RUN MODE - No changes will be made' : 'LIVE MODE - Changes will be applied');
+        if ($eventId) {
+            $this->info("Scoped to event id {$eventId}");
+        } else {
+            $this->warn('No --event= scope: this will consider crew results across ALL events.');
+        }
         $this->newLine();
 
         // Step 1: Find crew_results with time_ms that might be stale
@@ -55,6 +61,12 @@ class CleanupStaleCrewResults extends Command
         if ($teamName) {
             $query->whereHas('crew.team', function($q) use ($teamName) {
                 $q->where('name', 'like', "%{$teamName}%");
+            });
+        }
+
+        if ($eventId) {
+            $query->whereHas('raceResult.discipline', function($q) use ($eventId) {
+                $q->where('event_id', $eventId);
             });
         }
 
