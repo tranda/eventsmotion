@@ -680,8 +680,18 @@ class RaceResultController extends BaseController
                         ]);
                     }
 
-                    // 2. Calculate race time
-                    $raceTime = $this->calculateRaceTime($raceData['start_time'], $raceData['delay']);
+                    // 2. Calculate race time — anchor to this race's existing date
+                    // (or a date in the payload) so a re-sync never restamps it
+                    // with today's date.
+                    $existingRace = RaceResult::where('discipline_id', $discipline->id)
+                        ->where('stage', $raceData['stage'])
+                        ->first();
+                    $raceTime = $this->calculateRaceTime(
+                        $raceData['start_time'],
+                        $raceData['delay'],
+                        $existingRace ? $existingRace->race_time : null,
+                        $raceData['race_date'] ?? null
+                    );
 
                     // 3. Update or create RaceResult using discipline + stage as unique key
                     $raceResult = RaceResult::updateOrCreate(
@@ -996,26 +1006,39 @@ class RaceResultController extends BaseController
      * @param string $delay
      * @return Carbon
      */
-    private function calculateRaceTime($startTime, $delay)
+    /**
+     * Build a race datetime from a start time + delay, anchored to a real date.
+     *
+     * Date precedence: explicit $raceDate from the sheet > the date already stored
+     * on this race ($existingRaceTime, so a re-sync never moves it) > none.
+     * We deliberately do NOT default to "today": the old code parsed time-only
+     * (`createFromFormat('H:i', ...)`), so Carbon filled the date with the server's
+     * current day — stamping every event with the date it was pushed/imported.
+     */
+    private function calculateRaceTime($startTime, $delay, $existingRaceTime = null, $raceDate = null)
     {
         try {
-            // Parse start time (e.g., "10:00", "13:00")
-            $time = Carbon::createFromFormat('H:i', $startTime);
-            
-            // Parse delay (e.g., "0:05", "1:30", "3:00")
-            $delayParts = explode(':', $delay);
-            $delayMinutes = (int)$delayParts[0] * 60 + (int)$delayParts[1];
-            
-            $result = $time->addMinutes($delayMinutes);
-            
-            // Debug logging
-            \Log::info("Time calculation: {$startTime} + {$delay} = {$result->format('Y-m-d H:i:s')}");
-            
-            return $result;
+            $delayParts = array_pad(explode(':', (string) $delay), 2, '0');
+            $delayMinutes = (int) $delayParts[0] * 60 + (int) $delayParts[1];
+
+            if (!empty($raceDate)) {
+                $base = Carbon::parse($raceDate);
+            } elseif (!empty($existingRaceTime)) {
+                $base = Carbon::parse($existingRaceTime);   // keep the stored date; only time-of-day updates
+            } else {
+                \Log::warning('calculateRaceTime: no date available (no race_date in payload, no existing race_time); leaving race_time null. Add a date to the sync payload to set it.', [
+                    'start_time' => $startTime,
+                ]);
+                return null;
+            }
+
+            $timeParts = array_pad(explode(':', (string) $startTime), 2, '0');
+            return $base->copy()
+                ->setTime((int) $timeParts[0], (int) $timeParts[1], 0)
+                ->addMinutes($delayMinutes);
         } catch (\Exception $e) {
             \Log::error("Time calculation error: " . $e->getMessage());
-            // Return a default time if parsing fails
-            return Carbon::now()->setTime(10, 0);
+            return $existingRaceTime;   // never silently "now"
         }
     }
 
@@ -1372,10 +1395,19 @@ class RaceResultController extends BaseController
         $importedRaces = [];
 
         foreach ($races as $raceData) {
-            // Calculate race time if start_time and delay are provided
+            // Calculate race time if start_time and delay are provided. Anchor to
+            // the existing race's date (or a payload date) so a re-sync can't move it.
             $raceTime = null;
             if (isset($raceData['start_time']) && isset($raceData['delay'])) {
-                $raceTime = $this->calculateRaceTime($raceData['start_time'], $raceData['delay']);
+                $existingRace = RaceResult::where('discipline_id', $disciplineId)
+                    ->where('stage', $raceData['stage'])
+                    ->first();
+                $raceTime = $this->calculateRaceTime(
+                    $raceData['start_time'],
+                    $raceData['delay'],
+                    $existingRace ? $existingRace->race_time : null,
+                    $raceData['race_date'] ?? null
+                );
             }
 
             // Update or create race result
