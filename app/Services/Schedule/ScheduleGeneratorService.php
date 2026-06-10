@@ -666,6 +666,27 @@ class ScheduleGeneratorService
         return $count;
     }
 
+    /**
+     * Resolve the schedule date for a race by matching its discipline + stage to
+     * the first matching Setup block (same matcher the generator uses) and
+     * returning that block's event-day date as 'Y-m-d'. Used by the gsheet
+     * import so races land on the Setup day's date while keeping their own
+     * start time. Null when nothing matches (e.g. no Setup days defined).
+     */
+    public function resolveRaceDate(Event $event, Discipline $discipline, string $stage): ?string
+    {
+        if (!$event->relationLoaded('eventDays')) {
+            $event->load('eventDays.blocks');
+        }
+        foreach ($this->orderedBlocks($event->eventDays) as $block) {
+            if ($this->blockMatches($block, $discipline, $stage)) {
+                $date = $block->eventDay->date;
+                return $date instanceof Carbon ? $date->toDateString() : (string) $date;
+            }
+        }
+        return null;
+    }
+
     /** @param ScheduleBlock[] $orderedBlocks */
     private function findMatchingBlock(RaceResult $race, array $orderedBlocks): ?ScheduleBlock
     {

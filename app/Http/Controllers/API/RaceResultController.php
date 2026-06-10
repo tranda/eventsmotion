@@ -664,6 +664,12 @@ class RaceResultController extends BaseController
                 $cleanupResults = [];
                 $disciplinesProcessed = collect();
 
+                // For the gsheet import: anchor each race to its Setup day's date
+                // (matched by block filters) while keeping the sheet's own start
+                // time. Loaded once; null/empty when the event has no Setup days.
+                $scheduleEvent = Event::with('eventDays.blocks')->find($request->event_id);
+                $generator = app(\App\Services\Schedule\ScheduleGeneratorService::class);
+
                 foreach ($request->races as $raceData) {
                     \Log::info("Processing race: " . json_encode($raceData));
 
@@ -680,9 +686,12 @@ class RaceResultController extends BaseController
                         ]);
                     }
 
-                    // 2. Calculate race time — anchor to this race's existing date
-                    // (or a date in the payload) so a re-sync never restamps it
-                    // with today's date.
+                    // 2. Calculate race time. Date precedence: payload race_date >
+                    // matched Setup day's date > the race's existing date > none
+                    // (never today). The time-of-day always comes from the sheet.
+                    $blockDate = $scheduleEvent
+                        ? $generator->resolveRaceDate($scheduleEvent, $discipline, (string) ($raceData['stage'] ?? ''))
+                        : null;
                     $existingRace = RaceResult::where('discipline_id', $discipline->id)
                         ->where('stage', $raceData['stage'])
                         ->first();
@@ -690,7 +699,7 @@ class RaceResultController extends BaseController
                         $raceData['start_time'],
                         $raceData['delay'],
                         $existingRace ? $existingRace->race_time : null,
-                        $raceData['race_date'] ?? null
+                        $raceData['race_date'] ?? $blockDate
                     );
 
                     // 3. Update or create RaceResult using discipline + stage as unique key
@@ -1394,11 +1403,24 @@ class RaceResultController extends BaseController
     {
         $importedRaces = [];
 
+        // Resolve the discipline + its event (with Setup days) once, so imported
+        // races can anchor to the matched Setup day's date while keeping the
+        // sheet's own start time.
+        $discipline = Discipline::find($disciplineId);
+        $scheduleEvent = $discipline
+            ? Event::with('eventDays.blocks')->find($discipline->event_id)
+            : null;
+        $generator = app(\App\Services\Schedule\ScheduleGeneratorService::class);
+
         foreach ($races as $raceData) {
-            // Calculate race time if start_time and delay are provided. Anchor to
-            // the existing race's date (or a payload date) so a re-sync can't move it.
+            // Calculate race time if start_time and delay are provided. Date
+            // precedence: payload race_date > matched Setup day's date > existing
+            // date > none (never today). Time-of-day comes from the sheet.
             $raceTime = null;
             if (isset($raceData['start_time']) && isset($raceData['delay'])) {
+                $blockDate = ($scheduleEvent && $discipline)
+                    ? $generator->resolveRaceDate($scheduleEvent, $discipline, (string) ($raceData['stage'] ?? ''))
+                    : null;
                 $existingRace = RaceResult::where('discipline_id', $disciplineId)
                     ->where('stage', $raceData['stage'])
                     ->first();
@@ -1406,7 +1428,7 @@ class RaceResultController extends BaseController
                     $raceData['start_time'],
                     $raceData['delay'],
                     $existingRace ? $existingRace->race_time : null,
-                    $raceData['race_date'] ?? null
+                    $raceData['race_date'] ?? $blockDate
                 );
             }
 
