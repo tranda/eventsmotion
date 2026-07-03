@@ -8,8 +8,10 @@ use App\Models\Event;
 use App\Models\RaceResult;
 use App\Services\Schedule\LaneSeeder;
 use App\Services\Schedule\ScheduleGeneratorService;
+use App\Services\Schedule\ScheduleSnapshotService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use Throwable;
 
@@ -22,7 +24,28 @@ class ScheduleGenerationController extends BaseController
     public function __construct(
         private ScheduleGeneratorService $generator,
         private LaneSeeder $laneSeeder,
+        private ScheduleSnapshotService $snapshots,
     ) {}
+
+    /**
+     * Run a mutating closure inside a transaction that is ALWAYS rolled
+     * back at the end, and return the event_grid capture taken after the
+     * mutation but before the rollback. Used by dry_run=true previews so
+     * the operator can see the proposed plan without committing it.
+     *
+     * @return array{result: mixed, preview: array}
+     */
+    private function runDryRun(Event $event, callable $mutate): array
+    {
+        DB::beginTransaction();
+        try {
+            $result = $mutate();
+            $preview = $this->snapshots->capture($event->fresh(['eventDays']), 'event_grid');
+            return ['result' => $result, 'preview' => $preview];
+        } finally {
+            DB::rollBack();
+        }
+    }
 
     /**
      * POST /api/events/{id}/schedule/generate
@@ -42,11 +65,20 @@ class ScheduleGenerationController extends BaseController
         $data = $request->validate([
             'clean' => 'sometimes|boolean',
             'day' => 'sometimes|nullable|date_format:Y-m-d',
+            'dry_run' => 'sometimes|boolean',
         ]);
         $clean = (bool) ($data['clean'] ?? false);
         $day = $data['day'] ?? null;
+        $dryRun = (bool) ($data['dry_run'] ?? false);
 
         try {
+            if ($dryRun) {
+                $out = $this->runDryRun($event, fn() => $this->generator->generate($event, clean: $clean, day: $day));
+                return $this->sendResponse([
+                    'result' => $out['result']->toArray(),
+                    'preview' => $out['preview'],
+                ], 'Dry-run preview.');
+            }
             $result = $this->generator->generate($event, clean: $clean, day: $day);
         } catch (InvalidArgumentException $e) {
             return $this->sendError($e->getMessage(), [], 422);
@@ -61,15 +93,32 @@ class ScheduleGenerationController extends BaseController
         return $this->sendResponse($result->toArray(), $message);
     }
 
-    /** POST /api/disciplines/{id}/schedule/regenerate */
-    public function regenerateDiscipline($disciplineId)
+    /**
+     * POST /api/disciplines/{id}/schedule/regenerate
+     * Query: ?dry_run=true → runs in a rolled-back transaction and returns
+     *                        the proposed event_grid capture instead of
+     *                        committing.
+     */
+    public function regenerateDiscipline(Request $request, $disciplineId)
     {
         $discipline = Discipline::with('event')->find($disciplineId);
         if (!$discipline) {
             return $this->sendError('Discipline not found', [], 404);
         }
+        $event = $discipline->event;
+        if (!$event) {
+            return $this->sendError('Discipline has no event', [], 422);
+        }
+        $dryRun = $request->boolean('dry_run');
 
         try {
+            if ($dryRun) {
+                $out = $this->runDryRun($event, fn() => $this->generator->regenerateDiscipline($discipline));
+                return $this->sendResponse([
+                    'result' => $out['result']->toArray(),
+                    'preview' => $out['preview'],
+                ], 'Dry-run preview.');
+            }
             $result = $this->generator->regenerateDiscipline($discipline);
         } catch (InvalidArgumentException $e) {
             return $this->sendError($e->getMessage(), [], 422);

@@ -53,7 +53,7 @@ class ScheduleSnapshotController extends BaseController
         }
 
         $data = $request->validate([
-            'category' => 'required|string|in:setup,plan_seeds,grid_day',
+            'category' => 'required|string|in:setup,plan_seeds,grid_day,event_grid',
             'day' => 'nullable|date_format:Y-m-d|required_if:category,grid_day',
             'name' => 'required|string|max:200',
         ]);

@@ -13,6 +13,7 @@ use App\Models\Team;
 use App\Services\Schedule\IdbfRacePlans;
 use App\Services\Schedule\LaneSeeder;
 use App\Services\Schedule\ScheduleGeneratorService;
+use App\Services\Schedule\ScheduleSnapshotService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use InvalidArgumentException;
 use Tests\TestCase;
@@ -38,7 +39,7 @@ class LaneSeederTest extends TestCase
     {
         parent::setUp();
         $plans = new IdbfRacePlans();
-        $this->generator = new ScheduleGeneratorService($plans);
+        $this->generator = new ScheduleGeneratorService($plans, new ScheduleSnapshotService());
         $this->seeder = new LaneSeeder($plans);
     }
 

@@ -17,12 +17,16 @@ use InvalidArgumentException;
 /**
  * Capture/restore named snapshots of the schedule builder state.
  *
- * Three orthogonal categories:
+ * Four orthogonal categories:
  *   - setup      → event params (lane_count, default_rounds,
  *                  min_crews_per_race, color_map) + every day + every block.
  *   - plan_seeds → each discipline's progression (override_code,
  *                  custom_stages) + each crew's seed_number.
  *   - grid_day   → races + crew_results + breaks for one specific day.
+ *   - event_grid → grid_day capture for EVERY day in the event, bundled.
+ *                  Used by auto-snapshots taken before a regenerate /
+ *                  recompute so the whole event can be rolled back with
+ *                  one call.
  *
  * Categories are independent; restoring one doesn't touch the others.
  *
@@ -37,7 +41,7 @@ use InvalidArgumentException;
  */
 class ScheduleSnapshotService
 {
-    public function __construct(private ScheduleGeneratorService $generator) {}
+    public function __construct() {}
 
     public function capture(Event $event, string $category, ?string $day = null): array
     {
@@ -45,6 +49,7 @@ class ScheduleSnapshotService
             'setup' => $this->captureSetup($event),
             'plan_seeds' => $this->capturePlanSeeds($event),
             'grid_day' => $this->captureGridDay($event, $this->requireDay($day)),
+            'event_grid' => $this->captureEventGrid($event),
             default => throw new InvalidArgumentException("Unknown category: {$category}"),
         };
     }
@@ -55,6 +60,7 @@ class ScheduleSnapshotService
             'setup' => $this->restoreSetup($event, $payload),
             'plan_seeds' => $this->restorePlanSeeds($event, $payload),
             'grid_day' => $this->restoreGridDay($event, $this->requireDay($day), $payload),
+            'event_grid' => $this->restoreEventGrid($event, $payload),
             default => throw new InvalidArgumentException("Unknown category: {$category}"),
         };
     }
@@ -325,6 +331,89 @@ class ScheduleSnapshotService
         });
 
         return $stats;
+    }
+
+    // ---------------- EVENT GRID (all days) ----------------
+
+    /**
+     * Bundle a grid_day capture for every event day into one payload.
+     * Days without any races still appear so restore can safely wipe them.
+     *
+     * Payload shape:
+     *   { days: [ { day: 'YYYY-MM-DD', races: [...] }, … ] }
+     *
+     * Used by the auto-snapshot pass in ScheduleGeneratorService: takes one
+     * snapshot before every regenerate / recompute so the whole event can
+     * be rolled back with one restore call.
+     */
+    private function captureEventGrid(Event $event): array
+    {
+        $event->loadMissing('eventDays');
+
+        $days = [];
+        foreach ($event->eventDays->sortBy('sort_order') as $ed) {
+            $day = $ed->date instanceof Carbon ? $ed->date->toDateString() : (string) $ed->date;
+            $dayPayload = $this->captureGridDay($event, $day);
+            $days[] = ['day' => $day, 'races' => $dayPayload['races'] ?? []];
+        }
+
+        return ['days' => $days];
+    }
+
+    /**
+     * Restore every day in a captured event_grid payload. Refuses if any
+     * race in the event is currently IN_PROGRESS — restoring across a
+     * running race would delete its lane assignments and results.
+     *
+     * @throws InvalidArgumentException when any race in the event is IN_PROGRESS
+     */
+    private function restoreEventGrid(Event $event, array $payload): array
+    {
+        $this->refuseIfAnyRaceInProgress($event, null);
+
+        $stats = [
+            'days_restored' => 0,
+            'races_restored' => 0,
+            'crew_results_restored' => 0,
+            'warnings' => [],
+        ];
+
+        foreach ($payload['days'] ?? [] as $dp) {
+            $day = $dp['day'] ?? null;
+            if (!is_string($day) || $day === '') {
+                $stats['warnings'][] = 'Skipped a day entry with no date.';
+                continue;
+            }
+            $dayStats = $this->restoreGridDay($event, $day, ['races' => $dp['races'] ?? []]);
+            $stats['days_restored']++;
+            $stats['races_restored'] += $dayStats['races_restored'] ?? 0;
+            $stats['crew_results_restored'] += $dayStats['crew_results_restored'] ?? 0;
+            foreach ($dayStats['warnings'] ?? [] as $w) {
+                $stats['warnings'][] = "{$day}: {$w}";
+            }
+        }
+
+        return $stats;
+    }
+
+    /**
+     * Refuse a restore that would clobber a running race. Scope is
+     * 'event' (any IN_PROGRESS race in the event) or 'discipline'
+     * (only within the given discipline_id).
+     */
+    private function refuseIfAnyRaceInProgress(Event $event, ?int $disciplineId): void
+    {
+        $query = RaceResult::whereHas('discipline', fn($q) => $q->where('event_id', $event->id))
+            ->where('status', 'IN_PROGRESS');
+        if ($disciplineId !== null) {
+            $query->where('discipline_id', $disciplineId);
+        }
+        $running = $query->first();
+        if ($running) {
+            throw new InvalidArgumentException(
+                "Cannot restore: race {$running->race_number} ({$running->stage}) is currently IN_PROGRESS."
+            );
+        }
     }
 
     private function disciplineKey($discipline): string

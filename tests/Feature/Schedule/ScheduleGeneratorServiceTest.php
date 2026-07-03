@@ -12,6 +12,7 @@ use App\Models\ScheduleBlock;
 use App\Models\Team;
 use App\Services\Schedule\IdbfRacePlans;
 use App\Services\Schedule\ScheduleGeneratorService;
+use App\Services\Schedule\ScheduleSnapshotService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use InvalidArgumentException;
 use Tests\TestCase;
@@ -35,7 +36,7 @@ class ScheduleGeneratorServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new ScheduleGeneratorService(new IdbfRacePlans());
+        $this->service = new ScheduleGeneratorService(new IdbfRacePlans(), new ScheduleSnapshotService());
     }
 
     public function test_generates_expected_stage_count_for_rp_2a(): void
@@ -263,8 +264,26 @@ class ScheduleGeneratorServiceTest extends TestCase
         RaceResult::where('discipline_id', $discipline->id)->first()->update(['status' => 'IN_PROGRESS']);
 
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('already started or finished');
+        $this->expectExceptionMessage('IN_PROGRESS');
         $this->service->regenerateDiscipline($discipline->fresh());
+    }
+
+    public function test_regenerate_refuses_when_a_different_discipline_is_in_progress(): void
+    {
+        // Chunk-1 guardrail: even if the target discipline is untouched,
+        // any IN_PROGRESS race in the same event blocks a full-event
+        // regenerate — snapshotting would clobber the running race's rows.
+        $event = $this->makeEvent(laneCount: 6);
+        $this->addBlock($event, 'Morning', '09:00:00');
+        $a = $this->makeDiscipline($event, 6, distance: '200m');
+        $b = $this->makeDiscipline($event, 6, distance: '500m');
+
+        $this->service->generate($event);
+        RaceResult::where('discipline_id', $b->id)->first()->update(['status' => 'IN_PROGRESS']);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('IN_PROGRESS');
+        $this->service->generate($event->fresh());
     }
 
     // ----- helpers -----

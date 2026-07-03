@@ -8,6 +8,7 @@ use App\Models\Discipline;
 use App\Models\Event;
 use App\Models\RaceResult;
 use App\Models\ScheduleBlock;
+use App\Models\ScheduleSnapshot;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
@@ -24,7 +25,90 @@ use OutOfRangeException;
  */
 class ScheduleGeneratorService
 {
-    public function __construct(private IdbfRacePlans $plans) {}
+    /** Number of `auto:*` snapshots retained per event; older ones pruned after each capture. */
+    private const AUTO_SNAPSHOT_RETENTION = 10;
+
+    public function __construct(
+        private IdbfRacePlans $plans,
+        private ScheduleSnapshotService $snapshots,
+    ) {}
+
+    /**
+     * Take an event_grid snapshot before a mutating operation so the
+     * operator can roll back if the new plan is worse. Called at the top
+     * of generate() / regenerateDiscipline() / recomputeAllBlockTimes() /
+     * shiftFrom() / copyDayOrder().
+     *
+     * Named `auto: {reason} @ {timestamp}` so it's obvious which rows are
+     * auto-captured and safe to prune. Manual-named snapshots (any name
+     * without an `auto:` prefix) are never touched by the retention pass.
+     *
+     * Runs inside the caller's DB::transaction — if the caller rolls back
+     * (e.g. dry_run), the snapshot row rolls back with it. No orphans.
+     */
+    private function autoSnapshot(Event $event, string $reason): void
+    {
+        // Skip if the event has no days yet — nothing to snapshot.
+        $event->loadMissing('eventDays');
+        if ($event->eventDays->isEmpty()) {
+            return;
+        }
+
+        try {
+            $payload = $this->snapshots->capture($event, 'event_grid');
+        } catch (\Throwable $e) {
+            // Capture failing must not block a regenerate — log and move on.
+            \Log::warning('Auto-snapshot capture failed', [
+                'event_id' => $event->id,
+                'reason' => $reason,
+                'error' => $e->getMessage(),
+            ]);
+            return;
+        }
+
+        ScheduleSnapshot::create([
+            'event_id' => $event->id,
+            'category' => 'event_grid',
+            'day' => null,
+            'name' => 'auto: ' . $reason . ' @ ' . Carbon::now()->format('Y-m-d H:i:s'),
+            'payload' => $payload,
+            'created_by' => optional(auth()->user())->id,
+        ]);
+
+        // Retain last N auto-snapshots per event. Manual (non-auto:*)
+        // snapshots are never touched.
+        $keepIds = ScheduleSnapshot::where('event_id', $event->id)
+            ->where('name', 'like', 'auto:%')
+            ->orderByDesc('id')
+            ->limit(self::AUTO_SNAPSHOT_RETENTION)
+            ->pluck('id');
+        ScheduleSnapshot::where('event_id', $event->id)
+            ->where('name', 'like', 'auto:%')
+            ->whereNotIn('id', $keepIds)
+            ->delete();
+    }
+
+    /**
+     * Refuse a mutating operation when any race in the affected scope is
+     * currently IN_PROGRESS — regenerating over a running race would
+     * delete its lane assignments and results.
+     *
+     * @throws InvalidArgumentException
+     */
+    private function refuseIfAnyRaceInProgress(Event $event, ?int $disciplineId = null): void
+    {
+        $query = RaceResult::whereHas('discipline', fn($q) => $q->where('event_id', $event->id))
+            ->where('status', 'IN_PROGRESS');
+        if ($disciplineId !== null) {
+            $query->where('discipline_id', $disciplineId);
+        }
+        $running = $query->first();
+        if ($running) {
+            throw new InvalidArgumentException(
+                "Cannot regenerate: race {$running->race_number} ({$running->stage}) is currently IN_PROGRESS."
+            );
+        }
+    }
 
     /**
      * Regenerate the full schedule for an event.
@@ -42,6 +126,8 @@ class ScheduleGeneratorService
      */
     public function generate(Event $event, bool $clean = false, ?string $day = null): GenerationResult
     {
+        $this->refuseIfAnyRaceInProgress($event);
+
         $eventDays = $event->eventDays()->with('blocks')->get();
         if ($eventDays->isEmpty()) {
             throw new InvalidArgumentException('Event has no days configured. Add days and blocks before generating.');
@@ -81,6 +167,8 @@ class ScheduleGeneratorService
 
         $defaultRounds = (int) ($event->default_rounds ?? 3);
         DB::transaction(function () use ($event, $disciplines, $orderedBlocks, $defaultRounds, $result, $clean, $day) {
+            $this->autoSnapshot($event, $day ? "regenerate day {$day}" : 'regenerate');
+
             $preservedTimes = $clean ? [] : $this->snapshotRaceTimes($event);
 
             if ($day === null) {
@@ -129,6 +217,7 @@ class ScheduleGeneratorService
         if ($sourceDay === $targetDay) {
             throw new InvalidArgumentException('Source and target days must differ.');
         }
+        $this->refuseIfAnyRaceInProgress($event);
         $stats = ['matched' => 0, 'unmatched_source' => 0, 'unmatched_target' => 0];
 
         $matchKey = fn($race) => strtolower(implode('|', [
@@ -139,6 +228,8 @@ class ScheduleGeneratorService
         ]));
 
         DB::transaction(function () use ($event, $sourceDay, $targetDay, $matchKey, &$stats) {
+            $this->autoSnapshot($event, "copy day order {$sourceDay} to {$targetDay}");
+
             $sourceStart = Carbon::parse("{$sourceDay} 00:00:00");
             $sourceEnd = $sourceStart->copy()->addDay();
             $targetStart = Carbon::parse("{$targetDay} 00:00:00");
@@ -315,6 +406,7 @@ class ScheduleGeneratorService
         if (!$event) {
             throw new InvalidArgumentException("Discipline {$discipline->id} has no event");
         }
+        $this->refuseIfAnyRaceInProgress($event, $discipline->id);
         if (($discipline->status ?? 'active') !== 'active') {
             throw new InvalidArgumentException(
                 "Cannot regenerate {$discipline->getDisplayName()}: discipline is inactive."
@@ -339,6 +431,8 @@ class ScheduleGeneratorService
 
         $defaultRounds = (int) ($event->default_rounds ?? 3);
         DB::transaction(function () use ($discipline, $event, $orderedBlocks, $defaultRounds, $result) {
+            $this->autoSnapshot($event, "regenerate discipline {$discipline->id}");
+
             RaceResult::where('discipline_id', $discipline->id)
                 ->where('status', 'SCHEDULED')
                 ->delete();
@@ -642,6 +736,10 @@ class ScheduleGeneratorService
         if (!$eventId) {
             return 0;
         }
+        $event = Event::find($eventId);
+        if ($event) {
+            $this->refuseIfAnyRaceInProgress($event);
+        }
         $pivotTime = Carbon::parse($pivot->race_time);
 
         // Reuse RaceResult::scopeForEvent so both races and breaks are picked up.
@@ -655,7 +753,10 @@ class ScheduleGeneratorService
         }
 
         $count = 0;
-        DB::transaction(function () use ($query, $minutes, &$count) {
+        DB::transaction(function () use ($query, $minutes, $event, &$count) {
+            if ($event) {
+                $this->autoSnapshot($event, "shift {$minutes}min");
+            }
             $races = $query->get();
             foreach ($races as $race) {
                 $race->race_time = Carbon::parse($race->race_time)->addMinutes($minutes);
@@ -822,7 +923,9 @@ class ScheduleGeneratorService
             $blocksByDay[$dateStr][] = $block;
         }
 
-        DB::transaction(function () use ($bucketsByBlockId, $blocksByDay) {
+        DB::transaction(function () use ($event, $bucketsByBlockId, $blocksByDay) {
+            $this->autoSnapshot($event, 'recompute times');
+
             foreach ($blocksByDay as $dateStr => $dayBlocks) {
                 /** @var Carbon|null $cursor */
                 $cursor = null;
