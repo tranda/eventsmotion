@@ -25,6 +25,8 @@ class Event extends Model
         'name_entries_lock',
         'crew_entries_lock',
         'lane_count',
+        'hulls_small',
+        'hulls_standard',
         'default_rounds',
         'min_crews_per_race',
         'color_map',

@@ -668,13 +668,20 @@ class ScheduleGeneratorService
         //   • New races append after whatever's already in the block.
         //   • Operator can drag the new races wherever they want afterwards.
 
+        $fleetConfig = FleetConfig::fromEvent($event);
+
         $existingRaces = RaceResult::whereHas('discipline', fn($q) => $q->where('event_id', $event->id))
             ->where('status', 'SCHEDULED')
             ->whereNotNull('race_time')
+            ->with('discipline')
             ->get();
 
         // Block-id → latest race_time currently in that block. Carbon for math.
         $blockLatestTime = [];
+        // Block-id → [hull letter → Carbon of last use in this block]. Seeded
+        // from already-placed races so the rotation cursor stays consistent
+        // when we append new races into a block that's already half full.
+        $blockLastHullUse = [];
         foreach ($existingRaces as $race) {
             $block = $this->findMatchingBlock($race, $orderedBlocks);
             if (!$block) {
@@ -684,6 +691,12 @@ class ScheduleGeneratorService
             $existing = $blockLatestTime[$block->id] ?? null;
             if ($existing === null || $current->gt($existing)) {
                 $blockLatestTime[$block->id] = $current;
+            }
+            if (!empty($race->hull)) {
+                $prev = $blockLastHullUse[$block->id][$race->hull] ?? null;
+                if ($prev === null || $current->gt($prev)) {
+                    $blockLastHullUse[$block->id][$race->hull] = $current;
+                }
             }
         }
 
@@ -695,6 +708,10 @@ class ScheduleGeneratorService
             ->orderBy('id')
             ->get();
 
+        // Bucket new races by matching block, then apply wave ordering
+        // within each block: (phase, discipline_id, stage_number). Races
+        // with no matching block get a warning and are left unplaced.
+        $racesPerBlock = [];
         foreach ($newRaces as $race) {
             $block = $this->findMatchingBlock($race, $orderedBlocks);
             if (!$block) {
@@ -703,21 +720,82 @@ class ScheduleGeneratorService
                 );
                 continue;
             }
+            $racesPerBlock[$block->id][] = ['race' => $race, 'block' => $block];
+        }
+        foreach ($racesPerBlock as $blockId => &$rows) {
+            usort($rows, function ($a, $b) {
+                $ra = $a['race'];
+                $rb = $b['race'];
+                $pa = StagePhase::of((string) $ra->stage);
+                $pb = StagePhase::of((string) $rb->stage);
+                if ($pa !== $pb) return $pa <=> $pb;
+                if ($ra->discipline_id !== $rb->discipline_id) {
+                    return $ra->discipline_id <=> $rb->discipline_id;
+                }
+                $sa = StagePhase::stageNumber((string) $ra->stage);
+                $sb = StagePhase::stageNumber((string) $rb->stage);
+                if ($sa !== $sb) return $sa <=> $sb;
+                return ($ra->id ?? 0) <=> ($rb->id ?? 0);
+            });
+        }
+        unset($rows);
 
-            $latest = $blockLatestTime[$block->id] ?? null;
-            if ($latest === null) {
-                $dateStr = $block->eventDay->date instanceof Carbon
-                    ? $block->eventDay->date->toDateString()
-                    : (string) $block->eventDay->date;
-                $next = Carbon::parse($dateStr . ' ' . $block->start_time);
-            } else {
-                $next = $latest->copy()->addSeconds($block->gap_seconds);
+        $warnedBoatGroups = [];
+
+        foreach ($racesPerBlock as $blockId => $rows) {
+            foreach ($rows as $row) {
+                /** @var RaceResult $race */
+                $race = $row['race'];
+                /** @var ScheduleBlock $block */
+                $block = $row['block'];
+
+                $latest = $blockLatestTime[$block->id] ?? null;
+                if ($latest === null) {
+                    $dateStr = $block->eventDay->date instanceof Carbon
+                        ? $block->eventDay->date->toDateString()
+                        : (string) $block->eventDay->date;
+                    $cursor = Carbon::parse($dateStr . ' ' . $block->start_time);
+                } else {
+                    $cursor = $latest->copy()->addSeconds($block->gap_seconds);
+                }
+
+                $fleet = $fleetConfig->fleetFor(optional($race->discipline)->boat_group);
+                $assignedHull = null;
+                if (!empty($fleet)) {
+                    // Loop until a hull in the fleet has served its
+                    // turnaround. If none is free, advance the cursor by
+                    // one gap and try again.
+                    $turnaround = count($fleet) * (int) $block->gap_seconds;
+                    while (true) {
+                        foreach ($fleet as $letter) {
+                            $lastUse = $blockLastHullUse[$block->id][$letter] ?? null;
+                            if ($lastUse === null || $lastUse->copy()->addSeconds($turnaround)->lte($cursor)) {
+                                $assignedHull = $letter;
+                                break 2;
+                            }
+                        }
+                        $cursor = $cursor->copy()->addSeconds($block->gap_seconds);
+                    }
+                    $blockLastHullUse[$block->id][$assignedHull] = $cursor;
+                } elseif ($fleetConfig->isConfigured()) {
+                    // Event has hulls, but this boat_group isn't mapped —
+                    // one warning per group per generate keeps the noise
+                    // down.
+                    $bg = (string) (optional($race->discipline)->boat_group ?? '(none)');
+                    if (!isset($warnedBoatGroups[$bg])) {
+                        $result->addWarning(
+                            "Hull rotation skipped for boat group '{$bg}' — not mapped to small/standard."
+                        );
+                        $warnedBoatGroups[$bg] = true;
+                    }
+                }
+
+                $race->race_time = $cursor;
+                $race->hull = $assignedHull;
+                $race->save();
+
+                $blockLatestTime[$block->id] = $cursor;
             }
-
-            $race->race_time = $next;
-            $race->save();
-
-            $blockLatestTime[$block->id] = $next;
         }
     }
 
@@ -923,7 +1001,9 @@ class ScheduleGeneratorService
             $blocksByDay[$dateStr][] = $block;
         }
 
-        DB::transaction(function () use ($event, $bucketsByBlockId, $blocksByDay) {
+        $fleetConfig = FleetConfig::fromEvent($event);
+
+        DB::transaction(function () use ($event, $bucketsByBlockId, $blocksByDay, $fleetConfig) {
             $this->autoSnapshot($event, 'recompute times');
 
             foreach ($blocksByDay as $dateStr => $dayBlocks) {
@@ -931,7 +1011,7 @@ class ScheduleGeneratorService
                 $cursor = null;
                 foreach ($dayBlocks as $block) {
                     $entries = $bucketsByBlockId[$block->id] ?? [];
-                    $cursor = $this->recomputeBlockEntryTimes($block, $entries, $dateStr, $cursor);
+                    $cursor = $this->recomputeBlockEntryTimes($block, $entries, $dateStr, $cursor, $fleetConfig);
                 }
             }
         });
@@ -944,9 +1024,23 @@ class ScheduleGeneratorService
      * value after the last entry, so the caller can chain into the next block
      * on the same day. The block's start_time is a "not-before" anchor —
      * effective start is max(cursor, block.start_time).
+     *
+     * Recompute keeps the drag-sorted order (order by race_time). Wave order
+     * is NOT re-applied here — a drag operator has explicitly chosen a
+     * position, and recompute preserves that.
+     *
+     * Hulls are re-derived from the sorted order using a fresh per-block
+     * lastUse map, so a drag to a new slot picks up whatever hull fits the
+     * new position's rotation. Fleet lookup skipped entirely when the
+     * event has no hulls configured — behaves exactly as pre-hull code.
      */
-    private function recomputeBlockEntryTimes($block, array $entries, string $dateStr, ?Carbon $cursor): Carbon
-    {
+    private function recomputeBlockEntryTimes(
+        $block,
+        array $entries,
+        string $dateStr,
+        ?Carbon $cursor,
+        ?FleetConfig $fleetConfig = null,
+    ): Carbon {
         usort($entries, function ($a, $b) {
             $ta = $a->race_time;
             $tb = $b->race_time;
@@ -962,8 +1056,55 @@ class ScheduleGeneratorService
         $blockStart = Carbon::parse($dateStr . ' ' . $block->start_time);
         $next = ($cursor !== null && $cursor->gt($blockStart)) ? $cursor->copy() : $blockStart;
 
+        $hullsOn = $fleetConfig !== null && $fleetConfig->isConfigured();
+        $lastHullUse = [];  // fresh per-block, per-call
+
         foreach ($entries as $entry) {
             $entry->race_time = $next;
+
+            if (!$entry->isBreak() && $hullsOn) {
+                $fleet = $fleetConfig->fleetFor(optional($entry->discipline)->boat_group);
+                if (!empty($fleet)) {
+                    // Assign the first hull whose turnaround has been served
+                    // by $next. If none, fall back to the least-recently-used
+                    // — recompute preserves drag time, so we can't slip the
+                    // cursor here the way placeRacesIntoBlocks can.
+                    $turnaround = count($fleet) * (int) $block->gap_seconds;
+                    $chosen = null;
+                    foreach ($fleet as $letter) {
+                        $lu = $lastHullUse[$letter] ?? null;
+                        if ($lu === null || $lu->copy()->addSeconds($turnaround)->lte($next)) {
+                            $chosen = $letter;
+                            break;
+                        }
+                    }
+                    if ($chosen === null) {
+                        // No hull satisfies turnaround at this slot — pick
+                        // the least-recently-used and flag the row. This
+                        // only happens when drag has crammed races closer
+                        // than the fleet can serve; operator's on the hook.
+                        $bestLetter = null;
+                        $bestTime = null;
+                        foreach ($fleet as $letter) {
+                            $lu = $lastHullUse[$letter] ?? null;
+                            if ($bestTime === null || ($lu !== null && $lu->lt($bestTime))) {
+                                $bestLetter = $letter;
+                                $bestTime = $lu;
+                            }
+                        }
+                        $chosen = $bestLetter;
+                    }
+                    $entry->hull = $chosen;
+                    if ($chosen !== null) {
+                        $lastHullUse[$chosen] = $next;
+                    }
+                } else {
+                    // Fleet not applicable to this race — leave the
+                    // existing hull value alone. (Was already null from
+                    // an earlier generate, or was set manually.)
+                }
+            }
+
             $entry->save();
 
             if ($entry->isBreak()) {

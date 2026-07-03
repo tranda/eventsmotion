@@ -14,6 +14,7 @@ class RaceResult extends Model
         'discipline_id',
         'event_id',
         'race_time',
+        'hull',
         'stage',
         'status',
         'images',
