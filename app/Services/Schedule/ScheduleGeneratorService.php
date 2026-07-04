@@ -815,6 +815,7 @@ class ScheduleGeneratorService
                         RaceResult::create([
                             'event_id' => $event->id,
                             'entry_type' => 'break',
+                            'stage' => '',
                             'race_time' => $breakStart,
                             'duration_seconds' => $slipSeconds,
                             'label' => "auto: Boarding · {$dispName} · {$prev['stage']} → {$race->stage}",
