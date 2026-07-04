@@ -741,6 +741,24 @@ class ScheduleGeneratorService
         unset($rows);
 
         $warnedBoatGroups = [];
+        // Per-discipline last-placed race across the whole event so the
+        // boarding-gap rule and the 2-hour soft-warn can look back across
+        // block boundaries. Key = discipline_id, value = ['time' => Carbon,
+        // 'phase' => int, 'stage' => string].
+        $lastRaceByDiscipline = [];
+        // Seed from already-placed existing races so partial regenerates
+        // respect the constraint too.
+        foreach ($existingRaces as $er) {
+            if (!$er->discipline_id) continue;
+            $t = Carbon::parse($er->race_time);
+            $ph = StagePhase::of((string) $er->stage);
+            $prev = $lastRaceByDiscipline[$er->discipline_id] ?? null;
+            if ($prev === null || $t->gt($prev['time'])) {
+                $lastRaceByDiscipline[$er->discipline_id] = [
+                    'time' => $t, 'phase' => $ph, 'stage' => (string) $er->stage,
+                ];
+            }
+        }
 
         foreach ($racesPerBlock as $blockId => $rows) {
             foreach ($rows as $row) {
@@ -757,6 +775,22 @@ class ScheduleGeneratorService
                     $cursor = Carbon::parse($dateStr . ' ' . $block->start_time);
                 } else {
                     $cursor = $latest->copy()->addSeconds($block->gap_seconds);
+                }
+
+                // Boarding-gap rule: when this discipline's previous race
+                // was in a different phase (i.e. crews just changed stage
+                // type — heat→rep, rep→final, or round N → round N+1), the
+                // same crews need to physically re-board. Enforce that at
+                // least one other race sits between them by requiring the
+                // cursor to be at least 2 × block.gap_seconds after the
+                // previous same-discipline race.
+                $currentPhase = StagePhase::of((string) $race->stage);
+                $prev = $lastRaceByDiscipline[$race->discipline_id] ?? null;
+                if ($prev !== null && $prev['phase'] !== $currentPhase) {
+                    $minNext = $prev['time']->copy()->addSeconds(2 * (int) $block->gap_seconds);
+                    if ($cursor->lt($minNext)) {
+                        $cursor = $minNext;
+                    }
                 }
 
                 $fleet = $fleetConfig->fleetFor(optional($race->discipline)->boat_group);
@@ -790,11 +824,29 @@ class ScheduleGeneratorService
                     }
                 }
 
+                // 2-hour soft-warn: crews should not sit idle for hours
+                // between two of their stages. Hard scheduling constraints
+                // can force this in tight programmes, but flag it so the
+                // operator sees it in the Preview / warnings banner.
+                if ($prev !== null && $prev['phase'] !== $currentPhase) {
+                    $gapSeconds = $cursor->diffInSeconds($prev['time']);
+                    if ($gapSeconds > 7200) {
+                        $mins = intdiv($gapSeconds, 60);
+                        $dispName = optional($race->discipline)->getDisplayName() ?? "discipline #{$race->discipline_id}";
+                        $result->addWarning(
+                            "{$dispName}: {$prev['stage']} → {$race->stage} is {$mins} min apart (>2 h); consider re-ordering."
+                        );
+                    }
+                }
+
                 $race->race_time = $cursor;
                 $race->hull = $assignedHull;
                 $race->save();
 
                 $blockLatestTime[$block->id] = $cursor;
+                $lastRaceByDiscipline[$race->discipline_id] = [
+                    'time' => $cursor, 'phase' => $currentPhase, 'stage' => (string) $race->stage,
+                ];
             }
         }
     }
@@ -1058,8 +1110,24 @@ class ScheduleGeneratorService
 
         $hullsOn = $fleetConfig !== null && $fleetConfig->isConfigured();
         $lastHullUse = [];  // fresh per-block, per-call
+        $lastRaceByDiscipline = [];  // discipline_id → ['time' => Carbon, 'phase' => int]
 
         foreach ($entries as $entry) {
+            // Boarding-gap rule (mirrors placeRacesIntoBlocks): when this
+            // discipline's previous race was in a different phase, force
+            // the cursor forward by at least 2 × block.gap_seconds. Drag
+            // preserved the ORDER, we still enforce the physical spacing.
+            if (!$entry->isBreak() && $entry->discipline_id) {
+                $phase = StagePhase::of((string) $entry->stage);
+                $prev = $lastRaceByDiscipline[$entry->discipline_id] ?? null;
+                if ($prev !== null && $prev['phase'] !== $phase) {
+                    $minNext = $prev['time']->copy()->addSeconds(2 * (int) $block->gap_seconds);
+                    if ($next->lt($minNext)) {
+                        $next = $minNext;
+                    }
+                }
+            }
+
             $entry->race_time = $next;
 
             if (!$entry->isBreak() && $hullsOn) {
@@ -1106,6 +1174,13 @@ class ScheduleGeneratorService
             }
 
             $entry->save();
+
+            if (!$entry->isBreak() && $entry->discipline_id) {
+                $lastRaceByDiscipline[$entry->discipline_id] = [
+                    'time' => $next->copy(),
+                    'phase' => StagePhase::of((string) $entry->stage),
+                ];
+            }
 
             if ($entry->isBreak()) {
                 if ($entry->shift_subsequent) {
