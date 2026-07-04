@@ -192,6 +192,7 @@
                     <tr>
                         <th class="num" style="width: 22pt;">#</th>
                         <th class="time" style="width: 34pt;">Time</th>
+                        <th class="hull" style="width: 22pt;">Hull</th>
                         <th class="discipline" style="width: auto;">Discipline</th>
                         <th class="stage" style="width: 70pt;">Stage</th>
                     </tr>
@@ -202,6 +203,7 @@
                             <tr class="brk">
                                 <td class="num"></td>
                                 <td class="time">{{ $e['time'] }}</td>
+                                <td></td>
                                 <td colspan="2">
                                     ☕ {{ $e['label'] }}
                                     @if($e['duration_label']) ({{ $e['duration_label'] }}) @endif
@@ -224,6 +226,7 @@
                             <tr class="{{ $e['is_cancelled'] ? 'race-cancelled' : '' }}">
                                 <td class="num">{{ $e['race_number'] ?: '—' }}</td>
                                 <td class="time">{{ $e['time'] }}</td>
+                                <td class="hull" style="text-align: center; font-weight: bold;">{{ $e['hull'] ?? '' }}</td>
                                 <td class="discipline">
                                     @foreach($e['tokens'] as $tok)
                                         <span class="badge" style="background: {{ $tok['bg'] }}; color: {{ $tok['fg'] }};">{{ $tok['val'] }}</span>

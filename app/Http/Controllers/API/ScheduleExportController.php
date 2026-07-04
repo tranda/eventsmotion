@@ -308,6 +308,7 @@ class ScheduleExportController extends BaseController
                 'is_break' => false,
                 'race_number' => $e->race_number,
                 'time' => $t?->format('H:i') ?? '—',
+                'hull' => $e->hull,
                 'tokens' => $tokens,
                 'competition' => $competition,
                 'comp_bg' => $compColors['bg'],

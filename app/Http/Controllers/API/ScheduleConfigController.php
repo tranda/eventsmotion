@@ -39,6 +39,8 @@ class ScheduleConfigController extends BaseController
             'data' => [
                 'event_id' => $event->id,
                 'lane_count' => $event->lane_count,
+                'hulls_small' => $event->hulls_small ?? '',
+                'hulls_standard' => $event->hulls_standard ?? '',
                 'default_rounds' => $event->default_rounds ?? 3,
                 'min_crews_per_race' => $event->min_crews_per_race ?? 3,
                 'color_map' => $event->color_map,
@@ -81,6 +83,11 @@ class ScheduleConfigController extends BaseController
             'lane_count' => 'sometimes|integer|in:3,4,6,8,9',
             'default_rounds' => 'sometimes|integer|min:1|max:10',
             'min_crews_per_race' => 'sometimes|integer|min:1|max:20',
+            // Comma list of hull letters (e.g. "D,E,F"). Empty string
+            // clears the fleet. Stored raw — parsed on read by
+            // FleetConfig, which trims/uppercases/dedupes.
+            'hulls_small' => 'sometimes|nullable|string|max:64',
+            'hulls_standard' => 'sometimes|nullable|string|max:64',
             // Free-form JSON map { category => { value => hex_color } }.
             // Validated shallowly here; the frontend owns the schema.
             'color_map' => 'sometimes|nullable|array',
@@ -89,7 +96,7 @@ class ScheduleConfigController extends BaseController
         $event->update($validated);
 
         return $this->sendResponse(
-            $event->only(['id', 'lane_count', 'default_rounds', 'min_crews_per_race', 'color_map', 'schedule_status']),
+            $event->only(['id', 'lane_count', 'hulls_small', 'hulls_standard', 'default_rounds', 'min_crews_per_race', 'color_map', 'schedule_status']),
             'Schedule config updated.',
         );
     }
