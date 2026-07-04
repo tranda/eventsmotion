@@ -174,12 +174,27 @@ class ScheduleGeneratorService
             if ($day === null) {
                 // Full-event regenerate: wipe all SCHEDULED races.
                 $this->deleteScheduledRaces($event);
+                // Sweep stale auto-inserted boarding breaks — the next
+                // placement pass will insert fresh ones where needed.
+                // Manual/named breaks (lunch, ceremonies) are left alone.
+                RaceResult::where('event_id', $event->id)
+                    ->where('entry_type', 'break')
+                    ->where('label', 'like', 'auto: Boarding%')
+                    ->delete();
             } else {
                 // Per-day regenerate: wipe only the targeted disciplines'
                 // races; other disciplines (other days) untouched.
                 $disciplineIds = $disciplines->pluck('id')->all();
                 RaceResult::whereIn('discipline_id', $disciplineIds)
                     ->where('status', 'SCHEDULED')
+                    ->delete();
+                // Sweep auto-boarding breaks landing on this day.
+                $dayStart = Carbon::parse("{$day} 00:00:00");
+                $dayEnd = $dayStart->copy()->addDay();
+                RaceResult::where('event_id', $event->id)
+                    ->where('entry_type', 'break')
+                    ->where('label', 'like', 'auto: Boarding%')
+                    ->whereBetween('race_time', [$dayStart, $dayEnd])
                     ->delete();
             }
 
@@ -784,12 +799,28 @@ class ScheduleGeneratorService
                 // least one other race sits between them by requiring the
                 // cursor to be at least 2 × block.gap_seconds after the
                 // previous same-discipline race.
+                //
+                // When there IS no other race to fill the intermediate
+                // slot, drop an "auto: Boarding" break there so the
+                // marshal can see WHY there's air on the schedule.
                 $currentPhase = StagePhase::of((string) $race->stage);
                 $prev = $lastRaceByDiscipline[$race->discipline_id] ?? null;
                 if ($prev !== null && $prev['phase'] !== $currentPhase) {
                     $minNext = $prev['time']->copy()->addSeconds(2 * (int) $block->gap_seconds);
                     if ($cursor->lt($minNext)) {
+                        $breakStart = $cursor->copy();
+                        $slipSeconds = $breakStart->diffInSeconds($minNext);
                         $cursor = $minNext;
+                        $dispName = optional($race->discipline)->getDisplayName() ?? "discipline #{$race->discipline_id}";
+                        RaceResult::create([
+                            'event_id' => $event->id,
+                            'entry_type' => 'break',
+                            'race_time' => $breakStart,
+                            'duration_seconds' => $slipSeconds,
+                            'label' => "auto: Boarding · {$dispName} · {$prev['stage']} → {$race->stage}",
+                            'shift_subsequent' => false,
+                            'status' => 'SCHEDULED',
+                        ]);
                     }
                 }
 
