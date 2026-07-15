@@ -570,11 +570,17 @@ class PublicController extends BaseController
 
             $applyPublishedFilter = fn($q) => $isAdmin ? $q : $q->published();
 
+            // Do NOT filter by race.status='FINISHED' — older events sometimes
+            // never flipped the race entity's status even though every crew
+            // has a time and status=FINISHED. isFinalRound() already excludes
+            // CANCELLED races (via isHighestRaceNumberInDiscipline), and the
+            // per-crew medalist filter below requires finalStatus=FINISHED +
+            // non-null finalTimeMs, so a truly-unfinished race contributes
+            // nothing.
             $raceResults = $applyPublishedFilter(
                 RaceResult::with(['discipline', 'crewResults.crew.team.club'])
                     ->forEvent($eventId)
             )
-                ->where('status', 'FINISHED')
                 ->whereNotNull('discipline_id')
                 ->get();
 
