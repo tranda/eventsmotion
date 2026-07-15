@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\API;
 
 use App\Http\Controllers\API\BaseController as BaseController;
+use App\Models\Discipline;
 use App\Models\Event;
 use App\Models\RaceResult;
 use App\Services\Schedule\ProgressionDescriber;
@@ -579,6 +580,40 @@ class PublicController extends BaseController
 
             // competition => [ groupKey => [club_id, club_name, country, gold, silver, bronze] ]
             $byCompetition = [];
+
+            // Pre-populate every participating club/team so non-medalists
+            // still appear in the tally (with 0/0/0). Walks all disciplines
+            // of the event, groups by competition, and picks up the club
+            // from each registered crew's team.
+            $disciplines = Discipline::with(['crews.team.club'])
+                ->where('event_id', $eventId)
+                ->get();
+            foreach ($disciplines as $disc) {
+                $competition = $disc->competition;
+                if (!$competition) continue;
+                foreach ($disc->crews as $crew) {
+                    $team = $crew->team;
+                    if (!$team) continue;
+                    $club = $team->club;
+                    $clubId = $club?->id;
+                    $displayName = $club?->name ?? $team->name;
+                    if (!$displayName) continue;
+                    $groupKey = $clubId !== null ? "club:{$clubId}" : "team:{$displayName}";
+                    if (!isset($byCompetition[$competition])) {
+                        $byCompetition[$competition] = [];
+                    }
+                    if (!isset($byCompetition[$competition][$groupKey])) {
+                        $byCompetition[$competition][$groupKey] = [
+                            'club_id' => $clubId,
+                            'club_name' => $displayName,
+                            'country' => $club?->country,
+                            'gold' => 0,
+                            'silver' => 0,
+                            'bronze' => 0,
+                        ];
+                    }
+                }
+            }
 
             foreach ($raceResults as $race) {
                 if (!$race->isFinalRound()) continue;
