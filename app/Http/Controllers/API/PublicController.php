@@ -584,13 +584,14 @@ class PublicController extends BaseController
             // Pre-populate every participating club/team so non-medalists
             // still appear in the tally (with 0/0/0). Walks all disciplines
             // of the event, groups by competition, and picks up the club
-            // from each registered crew's team.
+            // from each registered crew's team. Older events don't set
+            // discipline.competition — group those under "Overall" so a
+            // single tally still shows instead of an empty response.
             $disciplines = Discipline::with(['crews.team.club'])
                 ->where('event_id', $eventId)
                 ->get();
             foreach ($disciplines as $disc) {
-                $competition = $disc->competition;
-                if (!$competition) continue;
+                $competition = $disc->competition ?: 'Overall';
                 foreach ($disc->crews as $crew) {
                     $team = $crew->team;
                     if (!$team) continue;
@@ -618,8 +619,9 @@ class PublicController extends BaseController
             foreach ($raceResults as $race) {
                 if (!$race->isFinalRound()) continue;
 
-                $competition = $race->discipline?->competition;
-                if (!$competition) continue;
+                // Match the pre-populate fallback: races without a discipline
+                // competition still belong to the "Overall" bucket.
+                $competition = $race->discipline?->competition ?: 'Overall';
 
                 // Rank crews by their medal-worthy time. getFinalTimesForDiscipline
                 // returns [crew_id => ['final_time_ms' => int, 'final_status' => str]]
