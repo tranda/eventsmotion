@@ -531,8 +531,160 @@ class PublicController extends BaseController
     }
 
     /**
+     * Per-club medal standings for an event, grouped by competition.
+     *
+     * Walks every FINISHED race with isFinalRound=true, takes the top 3
+     * finishers ranked by finalTimeMs (round-based: sum across rounds; heat-
+     * based: Grand Final time alone — the backend's getFinalTimesForDiscipline
+     * already encodes this split), and buckets medals per club, per
+     * competition. Same visibility rule as public/race-results: published
+     * events are visible to anyone, drafts to admin Bearer-token callers.
+     *
+     * Response:
+     *   { success, data: { event_id, event_name, competitions: [
+     *       { name: "Club",
+     *         standings: [ { club_id, club_name, country, gold, silver,
+     *                        bronze, total }, ... sorted G→S→B→name ] },
+     *       ...
+     *     ] } }
+     *
+     * @param int $eventId
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getPublicMedalStandings($eventId)
+    {
+        try {
+            $authUser = auth('sanctum')->user();
+            $isAdmin = $authUser && ($authUser->access_level ?? 0) >= 3;
+
+            $eventQuery = Event::query();
+            if (!$isAdmin) {
+                $eventQuery->where('schedule_status', 'published');
+            }
+            $event = $eventQuery->find($eventId);
+            if (!$event) {
+                return $this->sendError('Event not found', [], 404)
+                    ->header('Access-Control-Allow-Origin', '*');
+            }
+
+            $applyPublishedFilter = fn($q) => $isAdmin ? $q : $q->published();
+
+            $raceResults = $applyPublishedFilter(
+                RaceResult::with(['discipline', 'crewResults.crew.team.club'])
+                    ->forEvent($eventId)
+            )
+                ->where('status', 'FINISHED')
+                ->whereNotNull('discipline_id')
+                ->get();
+
+            // competition => [ groupKey => [club_id, club_name, country, gold, silver, bronze] ]
+            $byCompetition = [];
+
+            foreach ($raceResults as $race) {
+                if (!$race->isFinalRound()) continue;
+
+                $competition = $race->discipline?->competition;
+                if (!$competition) continue;
+
+                // Rank crews by their medal-worthy time. getFinalTimesForDiscipline
+                // returns [crew_id => ['final_time_ms' => int, 'final_status' => str]]
+                // with the correct semantics per plan type.
+                $finalTimes = $race->getFinalTimesForDiscipline();
+
+                $medalists = $race->crewResults
+                    ->filter(function ($cr) use ($finalTimes) {
+                        $ft = $finalTimes->get($cr->crew_id);
+                        return $ft
+                            && ($ft['final_status'] ?? null) === 'FINISHED'
+                            && ($ft['final_time_ms'] ?? null) !== null;
+                    })
+                    ->sortBy(function ($cr) use ($finalTimes) {
+                        return $finalTimes->get($cr->crew_id)['final_time_ms'];
+                    })
+                    ->values()
+                    ->take(3);
+
+                foreach ($medalists as $i => $cr) {
+                    $team = $cr->crew?->team;
+                    if (!$team) continue;
+
+                    $club = $team->club;
+                    $clubId = $club?->id;
+                    $displayName = $club?->name ?? $team->name;
+                    if (!$displayName) continue;
+
+                    // Group key: prefer club_id; fall back to name so
+                    // team-only records still sum among themselves.
+                    $groupKey = $clubId !== null ? "club:{$clubId}" : "team:{$displayName}";
+
+                    if (!isset($byCompetition[$competition])) {
+                        $byCompetition[$competition] = [];
+                    }
+                    if (!isset($byCompetition[$competition][$groupKey])) {
+                        $byCompetition[$competition][$groupKey] = [
+                            'club_id' => $clubId,
+                            'club_name' => $displayName,
+                            'country' => $club?->country,
+                            'gold' => 0,
+                            'silver' => 0,
+                            'bronze' => 0,
+                        ];
+                    }
+
+                    if ($i === 0) $byCompetition[$competition][$groupKey]['gold']++;
+                    elseif ($i === 1) $byCompetition[$competition][$groupKey]['silver']++;
+                    elseif ($i === 2) $byCompetition[$competition][$groupKey]['bronze']++;
+                }
+            }
+
+            // Sort competitions alphabetically, standings by G→S→B→name.
+            $competitions = [];
+            ksort($byCompetition);
+            foreach ($byCompetition as $name => $entries) {
+                $standings = array_values($entries);
+                usort($standings, function ($a, $b) {
+                    if ($a['gold'] !== $b['gold']) return $b['gold'] <=> $a['gold'];
+                    if ($a['silver'] !== $b['silver']) return $b['silver'] <=> $a['silver'];
+                    if ($a['bronze'] !== $b['bronze']) return $b['bronze'] <=> $a['bronze'];
+                    return strcasecmp($a['club_name'], $b['club_name']);
+                });
+                foreach ($standings as &$s) {
+                    $s['total'] = $s['gold'] + $s['silver'] + $s['bronze'];
+                }
+                unset($s);
+                $competitions[] = [
+                    'name' => $name,
+                    'standings' => $standings,
+                ];
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'event_id' => (int) $eventId,
+                    'event_name' => $event->name,
+                    'competitions' => $competitions,
+                ],
+                'message' => 'Medal standings retrieved successfully',
+            ], 200)
+                ->header('Access-Control-Allow-Origin', '*')
+                ->header('Access-Control-Allow-Methods', 'GET, OPTIONS')
+                ->header('Access-Control-Allow-Headers', 'Content-Type, Accept, Authorization')
+                ->header('Cache-Control', 'public, max-age=30');
+        } catch (\Throwable $e) {
+            \Log::error('getPublicMedalStandings failed', [
+                'event_id' => $eventId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            return $this->sendError('Error retrieving medal standings', [$e->getMessage()], 500)
+                ->header('Access-Control-Allow-Origin', '*');
+        }
+    }
+
+    /**
      * Handle OPTIONS request for CORS preflight.
-     * 
+     *
      * @return \Illuminate\Http\JsonResponse
      */
     public function handleCorsOptions()

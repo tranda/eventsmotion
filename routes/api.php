@@ -221,10 +221,15 @@ Route::prefix('public')->group(function () {
     // New public race results endpoints (matching the structure you requested)
     Route::get('race-results', [PublicController::class, 'getPublicRaceResults']);
     Route::get('race-results/{raceResultId}', [PublicController::class, 'getPublicRaceResult']);
-    
+
+    // Per-club medal standings, grouped by competition. Used by the Flutter
+    // Medals view and by external consumer apps.
+    Route::get('events/{eventId}/medals', [PublicController::class, 'getPublicMedalStandings']);
+
     // CORS preflight handling
     Route::options('events/{eventId}/race-results', [PublicController::class, 'handleCorsOptions']);
     Route::options('events/{eventId}/race-results/{raceId}', [PublicController::class, 'handleCorsOptions']);
     Route::options('race-results', [PublicController::class, 'handleCorsOptions']);
     Route::options('race-results/{raceResultId}', [PublicController::class, 'handleCorsOptions']);
+    Route::options('events/{eventId}/medals', [PublicController::class, 'handleCorsOptions']);
 });
