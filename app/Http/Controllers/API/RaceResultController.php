@@ -11,6 +11,7 @@ use App\Models\RaceResult;
 use App\Models\Team;
 use App\Services\Schedule\LaneSeeder;
 use App\Services\Schedule\ProgressionDescriber;
+use App\Support\EventEditGuard;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -258,6 +259,13 @@ class RaceResultController extends BaseController
      */
     public function store(Request $request)
     {
+        $user = $request->user();
+        if ($request->filled('event_id')) {
+            EventEditGuard::forEvent($request->input('event_id'), $user);
+        } else {
+            EventEditGuard::forDiscipline($request->input('discipline_id'), $user);
+        }
+
         try {
             $request->validate([
                 'race_number' => 'required|integer',
@@ -294,6 +302,8 @@ class RaceResultController extends BaseController
      */
     public function update(Request $request, $id)
     {
+        EventEditGuard::forRaceResult(RaceResult::find($id), $request->user());
+
         try {
             $raceResult = RaceResult::find($id);
 
@@ -338,6 +348,8 @@ class RaceResultController extends BaseController
      */
     public function destroy($id)
     {
+        EventEditGuard::forRaceResult(RaceResult::find($id), auth()->user());
+
         try {
             $raceResult = RaceResult::find($id);
 
@@ -367,6 +379,8 @@ class RaceResultController extends BaseController
      */
     public function clearCrewResults($raceResultId)
     {
+        EventEditGuard::forRaceResult(RaceResult::find($raceResultId), auth()->user());
+
         try {
             $raceResult = RaceResult::find($raceResultId);
             if (!$raceResult) {
@@ -433,6 +447,8 @@ class RaceResultController extends BaseController
      */
     public function recalculatePositions($raceResultId)
     {
+        EventEditGuard::forRaceResult(RaceResult::find($raceResultId), auth()->user());
+
         try {
             $raceResult = RaceResult::find($raceResultId);
 
@@ -469,6 +485,8 @@ class RaceResultController extends BaseController
      */
     public function storeCrewResults(Request $request, $raceResultId)
     {
+        EventEditGuard::forRaceResult(RaceResult::find($raceResultId), $request->user());
+
         try {
             $raceResult = RaceResult::find($raceResultId);
 
@@ -874,6 +892,8 @@ class RaceResultController extends BaseController
      */
     public function bulkImportWithCleanup(Request $request)
     {
+        EventEditGuard::forDiscipline($request->input('discipline_id'), $request->user());
+
         try {
             $request->validate([
                 'discipline_id' => 'required|exists:disciplines,id',
@@ -2039,6 +2059,11 @@ class RaceResultController extends BaseController
      */
     public function reorder(\Illuminate\Http\Request $request)
     {
+        $firstId = $request->input('updates.0.race_id');
+        if ($firstId) {
+            EventEditGuard::forRaceResult(RaceResult::find($firstId), $request->user());
+        }
+
         try {
             $request->validate([
                 'updates' => 'required|array|min:1|max:200',

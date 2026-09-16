@@ -7,6 +7,7 @@ use App\Http\Controllers\API\BaseController as BaseController;
 use Illuminate\Http\Request;
 use App\Models\Athlete;
 use App\Models\CrewAthlete;
+use App\Support\EventEditGuard;
 
 class CrewAthleteController extends BaseController
 {
@@ -40,6 +41,8 @@ class CrewAthleteController extends BaseController
         if ($user) {
             $clubId = $user->club_id;
 
+            EventEditGuard::forCrew($request->crew_id, $user);
+
             $athlete = new CrewAthlete();
             $athlete->crew_id = $request->crew_id;
             $athlete->athlete_id = $request->athlete_id;
@@ -60,6 +63,7 @@ class CrewAthleteController extends BaseController
         if ($user) {
             $clubId = $user->club_id;
             $crew = CrewAthlete::findOrFail($crewathleteId);
+            EventEditGuard::forCrew($crew->crew_id, $user);
             $crew->athlete_id = $request->athlete_id;
             // $crew->crew_id = $crewId;
 
@@ -78,6 +82,7 @@ class CrewAthleteController extends BaseController
         if ($user) {
             $clubId = $user->club_id;
             $athlete = CrewAthlete::findOrFail($crewathleteId);
+            EventEditGuard::forCrew($athlete->crew_id, $user);
             if ($athlete) {
                 $athlete->delete();
                 return response()->json($athlete);

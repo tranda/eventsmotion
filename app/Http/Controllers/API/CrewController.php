@@ -8,6 +8,7 @@ use Illuminate\Http\Request;
 use App\Models\Crew;
 use App\Models\CrewAthlete;
 use App\Models\Team;
+use App\Support\EventEditGuard;
 
 class CrewController extends BaseController
 {
@@ -20,8 +21,15 @@ class CrewController extends BaseController
     public function registerMulti(Request $request)
     {
         $team_id = $request->input('team_id');
-        $crews = Crew::where('team_id', $team_id)->delete();
         $disciplines = $request->input('discipline_ids');
+
+        // All disciplines in a registration set belong to the same event;
+        // guard on the first one before touching any data.
+        if (!empty($disciplines)) {
+            EventEditGuard::forDiscipline($disciplines[0], $request->user());
+        }
+
+        $crews = Crew::where('team_id', $team_id)->delete();
 
         $crews = [];
         if ($disciplines != null) {
@@ -46,6 +54,8 @@ class CrewController extends BaseController
         $team_id = $request->input('team_id');
         $discipline_id = $request->input('discipline_id');
 
+        EventEditGuard::forDiscipline($discipline_id, $request->user());
+
         $crew = new Crew();
         $crew->team_id = $team_id;
         $crew->discipline_id = $discipline_id;
@@ -63,6 +73,8 @@ class CrewController extends BaseController
     {
         $team_id = $request->input('team_id');
         $discipline_id = $request->input('discipline_id');
+
+        EventEditGuard::forDiscipline($discipline_id, $request->user());
 
         $crew = Crew::where('team_id', $team_id)->where('discipline_id', $discipline_id)->first();
         $crewAthletes = CrewAthlete::where('crew_id', $crew->id)->get();
