@@ -11,7 +11,8 @@ class Team extends Model
 
 	protected $fillable = [
         'name',
-        'club_id'
+        'club_id',
+        'active'
     ];
 
     // Automatically append these relationships when converting to array/JSON

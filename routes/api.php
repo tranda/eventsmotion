@@ -117,6 +117,8 @@ Route::middleware('auth:sanctum')->get('teamsForDiscipline', [TeamController::cl
 Route::middleware('auth:sanctum')->post('team', [TeamController::class, 'createTeam']);
 Route::middleware(['auth:sanctum', 'admin'])->put('teams/{id}', [TeamController::class, 'updateTeam']);
 Route::middleware(['auth:sanctum', 'admin'])->delete('teams/{id}', [TeamController::class, 'deleteTeam']);
+// Toggle active/inactive - admins or club managers of the team's own club
+Route::middleware('auth:sanctum')->patch('teams/{id}/active', [TeamController::class, 'setTeamActive']);
 
 Route::get('crewsAll', [CrewController::class, 'getAllCrews']);
 // Route::middleware('auth:sanctum')->get('crews', [CrewController::class, 'getCrewsByTeamId']);

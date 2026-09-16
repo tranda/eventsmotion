@@ -15,7 +15,8 @@ class TeamController extends BaseController
     public function getAllTeams(Request $request)
     {
         if ($request->has('active')) {
-            $teams = Team::whereHas('club', function ($query) {$query->where('active', 1);})
+            $teams = Team::where('active', 1)
+            ->whereHas('club', function ($query) {$query->where('active', 1);})
             ->orderBy('name')
             ->get();
         } else {
@@ -44,9 +45,11 @@ class TeamController extends BaseController
         $user = $request->user();
         if ($user) {
             $club_id = $user->club_id;
-            $teams = Team::where('club_id', $club_id)
-            ->orderBy('name')
-            ->get();
+            $query = Team::where('club_id', $club_id);
+            if ($request->has('active')) {
+                $query->where('active', 1);
+            }
+            $teams = $query->orderBy('name')->get();
             return response()->json($teams);
         } else {
             return response()->json(['error' => 'User not found'], 404);
@@ -158,6 +161,41 @@ class TeamController extends BaseController
         // Delete the team
         $team->delete();
         return response()->json(['message' => 'Team deleted successfully'], 200);
+    }
+
+    /**
+     * Mark a team active or inactive. Inactive teams are hidden from noisy
+     * listings but preserved for historical records. Permitted for admins
+     * (access_level >= 3) and for club managers acting on their own club's
+     * teams. This is intentionally NOT behind the admin middleware so club
+     * managers can manage their own teams.
+     */
+    public function setTeamActive(Request $request, $id)
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['error' => 'User not found'], 404);
+        }
+
+        $team = Team::find($id);
+        if (!$team) {
+            return response()->json(['error' => 'Team not found'], 404);
+        }
+
+        $isAdmin = (int) $user->access_level >= 3;
+        $ownsTeam = $user->club_id !== null && (int) $user->club_id === (int) $team->club_id;
+        if (!$isAdmin && !$ownsTeam) {
+            return response()->json(['error' => 'Unauthorized to modify this team'], 403);
+        }
+
+        if (!$request->has('active')) {
+            return response()->json(['error' => 'active field is required'], 422);
+        }
+
+        $team->active = $request->boolean('active');
+        $team->save();
+
+        return response()->json($team);
     }
 
 }
