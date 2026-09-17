@@ -9,6 +9,7 @@ use App\Models\Crew;
 use App\Models\CrewAthlete;
 use App\Models\Team;
 use App\Support\EventEditGuard;
+use App\Support\TeamRegistrationGuard;
 
 class CrewController extends BaseController
 {
@@ -22,6 +23,9 @@ class CrewController extends BaseController
     {
         $team_id = $request->input('team_id');
         $disciplines = $request->input('discipline_ids');
+
+        // Inactive teams (or teams of an inactive club) cannot register.
+        TeamRegistrationGuard::assertCanRegister($team_id, $request->user());
 
         // All disciplines in a registration set belong to the same event;
         // guard on the first one before touching any data.
@@ -53,6 +57,9 @@ class CrewController extends BaseController
     {
         $team_id = $request->input('team_id');
         $discipline_id = $request->input('discipline_id');
+
+        // Inactive teams (or teams of an inactive club) cannot register.
+        TeamRegistrationGuard::assertCanRegister($team_id, $request->user());
 
         EventEditGuard::forDiscipline($discipline_id, $request->user());
 
