@@ -41,7 +41,7 @@ class RaceResultController extends BaseController
 
         try {
             $eventId = $request->query('event_id');
-            
+
             if (!$eventId) {
                 return $this->sendError('Event ID is required', [], 422);
             }
@@ -52,150 +52,7 @@ class RaceResultController extends BaseController
             $isAdmin = $user && ($user->access_level ?? 0) >= 3;
             $includeDrafts = $isAdmin && $request->boolean('include_drafts');
 
-            $applyPublishedFilter = fn($query) => $includeDrafts ? $query : $query->published();
-
-            // Filter out races for inactive disciplines — break rows have no
-            // discipline so they're always included.
-            $activeDisciplineFilter = fn($query) => $query->where(function ($q) {
-                $q->whereDoesntHave('discipline')
-                  ->orWhereHas('discipline', fn($d) => $d->where('status', 'active'));
-            });
-
-            // Grid is the source of truth: it iterates lanes 1..N and only
-            // renders crews that sit on a lane. Filter the eager load the
-            // same way so other consumers (Race Results, exports, progression)
-            // never see the lane=null / lane=0 ghost rows that auto-fill /
-            // re-seed / legacy Sheets data leave behind.
-            $crewLaneFilter = fn($q) => $q->whereNotNull('lane')->where('lane', '>', 0);
-
-            // Get all races for the event regardless of completion status
-            try {
-                $raceResults = $activeDisciplineFilter(
-                    $applyPublishedFilter(
-                        RaceResult::with([
-                            'discipline',
-                            'crewResults' => $crewLaneFilter,
-                            'crewResults.crew.team.club',
-                            'crewResults.crew.discipline',
-                        ])->forEvent($eventId)
-                    )
-                )
-                    ->orderBy('race_number', 'asc')
-                    ->get();
-            } catch (\Exception $e) {
-                \Log::error("Error loading race results with crews: " . $e->getMessage());
-                // Fallback to basic loading
-                $raceResults = $activeDisciplineFilter(
-                    $applyPublishedFilter(
-                        RaceResult::with([
-                            'discipline',
-                            'crewResults' => $crewLaneFilter,
-                            'crewResults.crew',
-                        ])->forEvent($eventId)
-                    )
-                )
-                    ->orderBy('race_number', 'asc')
-                    ->get();
-            }
-            
-            // Compute the auto-derived "where do these crews go next" line
-            // for every scheduled race in the event. Returned as race_id => string.
-            // Falls back to the per-race override when the plan can't be resolved.
-            $progressionByRace = [];
-            if ($this->progressionDescriber) {
-                try {
-                    $byDiscipline = $raceResults
-                        ->filter(fn($r) => ($r->entry_type ?? 'race') === 'race' && $r->discipline_id)
-                        ->groupBy('discipline_id');
-                    $event = Event::find($eventId);
-                    $laneCount = (int) ($event->lane_count ?? 6);
-                    foreach ($byDiscipline as $disciplineRaces) {
-                        $discipline = $disciplineRaces->first()->discipline;
-                        if (!$discipline) continue;
-                        $msgs = $this->progressionDescriber->forDiscipline(
-                            $discipline,
-                            $disciplineRaces,
-                            $laneCount,
-                        );
-                        foreach ($msgs as $rid => $m) {
-                            $progressionByRace[$rid] = $m;
-                        }
-                    }
-                } catch (\Throwable $e) {
-                    \Log::warning('Progression derivation failed: ' . $e->getMessage());
-                }
-            }
-
-            // Enhance race results with final round information and crew results
-            $enhancedRaceResults = $raceResults->map(function($raceResult) use ($progressionByRace) {
-                // Get all crew results with final time calculations. Apply the
-                // same lane-set filter as the outer eager-load so this fresh
-                // fetch doesn't re-introduce the ghost rows the controller is
-                // trying to hide, then dedupe per lane keeping the highest-id
-                // row (matches the Grid's "last-write-wins" map behaviour
-                // for duplicate-lane assignments).
-                $allCrewResults = $raceResult->crewResults()
-                    ->whereNotNull('lane')
-                    ->where('lane', '>', 0)
-                    ->orderBy('id')
-                    ->with(['crew.team.club', 'crew.discipline'])
-                    ->get()
-                    ->groupBy('lane')
-                    ->map(fn($g) => $g->sortByDesc('id')->first())
-                    ->values();
-
-                // Final-round enrichment: when this race is the chronologically
-                // last race in its discipline (or a Grand Final / Final), attach
-                // each crew's accumulated time + final status — same data the
-                // public endpoint already exposes for Race Results. Without this
-                // the Grid's lane badge falls back to the per-race time and
-                // never shows the summed result.
-                $isFinalRound = $raceResult->isFinalRound();
-                $finalTimesByCrew = collect();
-                if ($isFinalRound) {
-                    try {
-                        $finalTimesByCrew = $raceResult->getFinalTimesForDiscipline();
-                    } catch (\Throwable $e) {
-                        \Log::warning('Final-times enrichment failed: ' . $e->getMessage(), [
-                            'race_id' => $raceResult->id,
-                        ]);
-                    }
-                }
-
-                // Convert to array for proper JSON serialization
-                $raceResultArray = $raceResult->toArray();
-
-                // Add enhanced crew results (convert each item to array)
-                // allCrewResults returns mixed objects, so we need to handle them properly
-                $raceResultArray['crew_results'] = $allCrewResults->map(function($crewResult) use ($isFinalRound, $finalTimesByCrew) {
-                    // Handle both Eloquent models and stdClass objects
-                    if ($crewResult instanceof \Illuminate\Database\Eloquent\Model) {
-                        $arr = $crewResult->toArray();
-                    } else {
-                        // For stdClass objects, cast to array
-                        $arr = (array) $crewResult;
-                    }
-                    if ($isFinalRound) {
-                        $crewId = $arr['crew_id'] ?? null;
-                        $final = $crewId !== null ? $finalTimesByCrew->get($crewId) : null;
-                        $arr['final_time_ms'] = $final['final_time_ms'] ?? null;
-                        $arr['final_status'] = $final['final_status'] ?? null;
-                        $arr['is_final_round'] = true;
-                    } else {
-                        $arr['final_time_ms'] = null;
-                        $arr['final_status'] = null;
-                        $arr['is_final_round'] = false;
-                    }
-                    return $arr;
-                })->values()->toArray();
-
-                // Add additional computed properties
-                $raceResultArray['is_final_round'] = $isFinalRound;
-                $raceResultArray['show_accumulated_time'] = $raceResult->shouldShowAccumulatedTime();
-                $raceResultArray['progression_rule'] = $progressionByRace[$raceResult->id] ?? '';
-
-                return $raceResultArray;
-            });
+            $enhancedRaceResults = $this->buildEventRaces((int) $eventId, $includeDrafts);
 
             return response()->json([
                 'success' => true,
@@ -206,6 +63,222 @@ class RaceResultController extends BaseController
         } catch (\Exception $e) {
             return $this->sendError('Error retrieving race results', [$e->getMessage()], 500);
         }
+    }
+
+    /**
+     * Get published races for a single club within an event.
+     *
+     * API-key endpoint (permission `races.read`) for external apps: returns
+     * only the requested club's crews per race, opponents stripped. There is no
+     * authenticated user on an API-key request, so drafts are never included —
+     * published schedules only.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function forClub(Request $request)
+    {
+        $validated = $request->validate([
+            'event_id' => 'required|exists:events,id',
+            'club_id' => 'required|exists:clubs,id',
+        ]);
+
+        try {
+            $enhancedRaceResults = $this->buildEventRaces(
+                (int) $validated['event_id'],
+                false,
+                (int) $validated['club_id'],
+            );
+
+            return response()->json([
+                'success' => true,
+                'data' => $enhancedRaceResults,
+                'message' => 'Race results retrieved successfully'
+            ], 200);
+
+        } catch (\Exception $e) {
+            return $this->sendError('Error retrieving race results', [$e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Build the enriched race collection for an event: eager-loaded crews,
+     * progression lines and final-round times. Shared by index() (full program)
+     * and forClub() (single club, opponents stripped).
+     *
+     * @param int      $eventId
+     * @param bool     $includeDrafts Include unpublished schedules (admin only).
+     * @param int|null $clubId        When set, keep only races the club races in
+     *                                and strip crew_results to that club's crews.
+     * @return \Illuminate\Support\Collection
+     */
+    private function buildEventRaces(int $eventId, bool $includeDrafts, ?int $clubId = null)
+    {
+        $applyPublishedFilter = fn($query) => $includeDrafts ? $query : $query->published();
+
+        // Filter out races for inactive disciplines — break rows have no
+        // discipline so they're always included.
+        $activeDisciplineFilter = fn($query) => $query->where(function ($q) {
+            $q->whereDoesntHave('discipline')
+              ->orWhereHas('discipline', fn($d) => $d->where('status', 'active'));
+        });
+
+        // Grid is the source of truth: it iterates lanes 1..N and only
+        // renders crews that sit on a lane. Filter the eager load the
+        // same way so other consumers (Race Results, exports, progression)
+        // never see the lane=null / lane=0 ghost rows that auto-fill /
+        // re-seed / legacy Sheets data leave behind.
+        $crewLaneFilter = fn($q) => $q->whereNotNull('lane')->where('lane', '>', 0);
+
+        // Get all races for the event regardless of completion status
+        try {
+            $raceResults = $activeDisciplineFilter(
+                $applyPublishedFilter(
+                    RaceResult::with([
+                        'discipline',
+                        'crewResults' => $crewLaneFilter,
+                        'crewResults.crew.team.club',
+                        'crewResults.crew.discipline',
+                    ])->forEvent($eventId)
+                )
+            )
+                ->orderBy('race_number', 'asc')
+                ->get();
+        } catch (\Exception $e) {
+            \Log::error("Error loading race results with crews: " . $e->getMessage());
+            // Fallback to basic loading
+            $raceResults = $activeDisciplineFilter(
+                $applyPublishedFilter(
+                    RaceResult::with([
+                        'discipline',
+                        'crewResults' => $crewLaneFilter,
+                        'crewResults.crew',
+                    ])->forEvent($eventId)
+                )
+            )
+                ->orderBy('race_number', 'asc')
+                ->get();
+        }
+
+        // Compute the auto-derived "where do these crews go next" line
+        // for every scheduled race in the event. Returned as race_id => string.
+        // Falls back to the per-race override when the plan can't be resolved.
+        // Derived on the FULL event race set — progression needs every race in a
+        // discipline to resolve, so this must run before any club filter below.
+        $progressionByRace = [];
+        if ($this->progressionDescriber) {
+            try {
+                $byDiscipline = $raceResults
+                    ->filter(fn($r) => ($r->entry_type ?? 'race') === 'race' && $r->discipline_id)
+                    ->groupBy('discipline_id');
+                $event = Event::find($eventId);
+                $laneCount = (int) ($event->lane_count ?? 6);
+                foreach ($byDiscipline as $disciplineRaces) {
+                    $discipline = $disciplineRaces->first()->discipline;
+                    if (!$discipline) continue;
+                    $msgs = $this->progressionDescriber->forDiscipline(
+                        $discipline,
+                        $disciplineRaces,
+                        $laneCount,
+                    );
+                    foreach ($msgs as $rid => $m) {
+                        $progressionByRace[$rid] = $m;
+                    }
+                }
+            } catch (\Throwable $e) {
+                \Log::warning('Progression derivation failed: ' . $e->getMessage());
+            }
+        }
+
+        // Club scope: keep only races this club races in. Progression is already
+        // resolved against the full set above, so filtering here is safe.
+        if ($clubId !== null) {
+            $raceResults = $raceResults->filter(function ($raceResult) use ($clubId) {
+                return $raceResult->crewResults->contains(
+                    fn($cr) => optional(optional($cr->crew)->team)->club_id == $clubId
+                );
+            })->values();
+        }
+
+        // Enhance race results with final round information and crew results
+        $enhancedRaceResults = $raceResults->map(function($raceResult) use ($progressionByRace, $clubId) {
+            // Get all crew results with final time calculations. Apply the
+            // same lane-set filter as the outer eager-load so this fresh
+            // fetch doesn't re-introduce the ghost rows the controller is
+            // trying to hide, then dedupe per lane keeping the highest-id
+            // row (matches the Grid's "last-write-wins" map behaviour
+            // for duplicate-lane assignments).
+            $allCrewResults = $raceResult->crewResults()
+                ->whereNotNull('lane')
+                ->where('lane', '>', 0)
+                ->orderBy('id')
+                ->with(['crew.team.club', 'crew.discipline'])
+                ->get()
+                ->groupBy('lane')
+                ->map(fn($g) => $g->sortByDesc('id')->first())
+                ->values();
+
+            // Club scope: strip opponents' lanes, keep only this club's crews.
+            if ($clubId !== null) {
+                $allCrewResults = $allCrewResults->filter(
+                    fn($cr) => optional(optional($cr->crew)->team)->club_id == $clubId
+                )->values();
+            }
+
+            // Final-round enrichment: when this race is the chronologically
+            // last race in its discipline (or a Grand Final / Final), attach
+            // each crew's accumulated time + final status — same data the
+            // public endpoint already exposes for Race Results. Without this
+            // the Grid's lane badge falls back to the per-race time and
+            // never shows the summed result.
+            $isFinalRound = $raceResult->isFinalRound();
+            $finalTimesByCrew = collect();
+            if ($isFinalRound) {
+                try {
+                    $finalTimesByCrew = $raceResult->getFinalTimesForDiscipline();
+                } catch (\Throwable $e) {
+                    \Log::warning('Final-times enrichment failed: ' . $e->getMessage(), [
+                        'race_id' => $raceResult->id,
+                    ]);
+                }
+            }
+
+            // Convert to array for proper JSON serialization
+            $raceResultArray = $raceResult->toArray();
+
+            // Add enhanced crew results (convert each item to array)
+            // allCrewResults returns mixed objects, so we need to handle them properly
+            $raceResultArray['crew_results'] = $allCrewResults->map(function($crewResult) use ($isFinalRound, $finalTimesByCrew) {
+                // Handle both Eloquent models and stdClass objects
+                if ($crewResult instanceof \Illuminate\Database\Eloquent\Model) {
+                    $arr = $crewResult->toArray();
+                } else {
+                    // For stdClass objects, cast to array
+                    $arr = (array) $crewResult;
+                }
+                if ($isFinalRound) {
+                    $crewId = $arr['crew_id'] ?? null;
+                    $final = $crewId !== null ? $finalTimesByCrew->get($crewId) : null;
+                    $arr['final_time_ms'] = $final['final_time_ms'] ?? null;
+                    $arr['final_status'] = $final['final_status'] ?? null;
+                    $arr['is_final_round'] = true;
+                } else {
+                    $arr['final_time_ms'] = null;
+                    $arr['final_status'] = null;
+                    $arr['is_final_round'] = false;
+                }
+                return $arr;
+            })->values()->toArray();
+
+            // Add additional computed properties
+            $raceResultArray['is_final_round'] = $isFinalRound;
+            $raceResultArray['show_accumulated_time'] = $raceResult->shouldShowAccumulatedTime();
+            $raceResultArray['progression_rule'] = $progressionByRace[$raceResult->id] ?? '';
+
+            return $raceResultArray;
+        });
+
+        return $enhancedRaceResults;
     }
 
     /**

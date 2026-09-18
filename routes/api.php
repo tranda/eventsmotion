@@ -139,6 +139,9 @@ Route::middleware('apikey:races.bulk-update')->post('race-results/bulk-update', 
 Route::middleware('apikey:races.bulk-update')->get('race-results/fetch-plans', [RaceResultController::class, 'fetchRacePlans']);
 // Secure single race update endpoint by race ID - requires API key with specific permission (same as bulk-update)
 Route::middleware('apikey:races.bulk-update')->post('race-results/update-single', [RaceResultController::class, 'updateSingleRaceById']);
+// Read published races for a single club within an event (external apps) - requires API key with races.read
+// Registered before race-results/{id} so the static path isn't captured as an {id} param.
+Route::middleware('apikey:races.read')->get('race-results/for-club', [RaceResultController::class, 'forClub']);
 // Enhanced import endpoint with cleanup logic for discipline-specific imports
 Route::middleware('auth:sanctum')->post('race-results/bulk-import-with-cleanup', [RaceResultController::class, 'bulkImportWithCleanup']);
 Route::middleware('auth:sanctum')->get('race-results', [RaceResultController::class, 'index']);
