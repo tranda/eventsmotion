@@ -199,7 +199,7 @@ class ScheduleGeneratorService
             }
 
             foreach ($disciplines as $discipline) {
-                $this->generateForDiscipline($discipline, $event->lane_count, $defaultRounds, $result);
+                $this->generateForDiscipline($discipline, $event->lane_count, $defaultRounds, $result, $event);
             }
 
             if (!$clean) {
@@ -457,6 +457,7 @@ class ScheduleGeneratorService
                 $event->lane_count,
                 $defaultRounds,
                 $result,
+                $event,
             );
             $this->placeRacesIntoBlocks($event, $orderedBlocks, $result);
             $this->recomputeAllBlockTimes($event);
@@ -471,6 +472,7 @@ class ScheduleGeneratorService
         int $laneCount,
         int $defaultRounds,
         GenerationResult $result,
+        Event $event,
     ): void {
         $crews = $discipline->crews()->orderBy('id')->get();
         $crewCount = $crews->count();
@@ -512,10 +514,11 @@ class ScheduleGeneratorService
         // paths below). (int) parses both "2000m" and a bare "2000". Explicit
         // plan-code overrides still win.
         if (!$override && (int) $discipline->distance > 1000) {
-            $this->generateSingleFinalForDiscipline(
+            $this->generateLongDistanceFinals(
                 $discipline,
                 $laneCount,
                 $crewCount,
+                $this->longRaceTeamLimit($event, $discipline),
                 $result,
             );
             return;
@@ -1351,64 +1354,163 @@ class ScheduleGeneratorService
     }
 
     /**
-     * Generate a single "Final" race with every crew racing together. Used for
-     * long-distance disciplines (> 1000m), which are always one decisive final.
+     * Generate the final(s) for a long-distance discipline (> 1000m). These
+     * have no heats/rounds — every crew races once and the standing is decided
+     * by finish time.
      *
-     * When the crews fit on the course (crewCount <= laneCount) we reuse the
-     * centre-out lane convention. When there are MORE crews than lanes (a
-     * mass-start long-distance final) every crew still races in the one Final —
-     * lanes are then assigned sequentially by seed (lane 1 = seed 1, …) so no
-     * crew is dropped, even though lane numbers exceed laneCount.
+     * With no boat-group team limit (or a field that fits), it is a single
+     * "Final". When a limit is set and there are more crews than boats, the
+     * field is split into balanced flights ("Final 1", "Final 2", …).
+     *
+     * Crews are distributed serpentine by seed so flights are balanced in
+     * strength (fairer, since water/wind differ between flights). Within a
+     * flight, lanes are centre-out (fastest in the centre) when the flight fits
+     * the course, or sequential 1..N when a flight itself exceeds laneCount —
+     * the team limit governs flight size, not laneCount.
+     *
+     * @param int|null $limit max teams per race for this boat group; null = unlimited
      */
-    private function generateSingleFinalForDiscipline(
+    private function generateLongDistanceFinals(
         Discipline $discipline,
         int $laneCount,
         int $crewCount,
+        ?int $limit,
         GenerationResult $result,
     ): void {
         $this->ensureCrewSeeds($discipline, $discipline->crews()->orderBy('id')->get());
         $crews = $discipline->crews()->orderBy('id')->get();
         $crewsBySeed = $crews->keyBy('seed_number');
 
-        $race = RaceResult::create([
-            'race_number' => 0, // renumbered later
-            'discipline_id' => $discipline->id,
-            'race_time' => null,
-            'stage' => 'Final',
-            'status' => 'SCHEDULED',
-        ]);
-        $result->racesCreated++;
+        $flightCount = ($limit === null || $limit <= 0 || $crewCount <= $limit)
+            ? 1
+            : (int) ceil($crewCount / $limit);
 
-        if ($crewCount <= $laneCount) {
-            // Fits on the course: centre-out seeding (fastest in the centre).
-            $laneSeeding = $this->roundLaneSeeding($laneCount, $crewCount, 1);
-        } else {
-            // More crews than lanes: mass-start final, everyone races. Assign
-            // lanes 1..crewCount by seed order so nobody is left out.
-            $laneSeeding = [];
-            for ($seed = 1; $seed <= $crewCount; $seed++) {
-                $laneSeeding[$seed] = $seed; // lane => seed_number
-            }
-        }
+        $flights = $this->splitSeedsIntoFlights($crewCount, $flightCount);
+        $single = $flightCount === 1;
 
-        foreach ($laneSeeding as $lane => $seedNumber) {
-            if ($seedNumber === null) {
-                continue;
-            }
-            $crew = $crewsBySeed->get($seedNumber);
-            if (!$crew) {
-                continue;
-            }
-            CrewResult::create([
-                'race_result_id' => $race->id,
-                'crew_id' => $crew->id,
-                'lane' => $lane,
-                'status' => null,
+        foreach ($flights as $i => $flightSeeds) {
+            $stage = $single ? 'Final' : 'Final ' . ($i + 1);
+            $race = RaceResult::create([
+                'race_number' => 0, // renumbered later
+                'discipline_id' => $discipline->id,
+                'race_time' => null,
+                'stage' => $stage,
+                'status' => 'SCHEDULED',
             ]);
-            $result->crewLanesAssigned++;
+            $result->racesCreated++;
+
+            foreach ($this->flightLaneSeeding($flightSeeds, $laneCount) as $lane => $seedNumber) {
+                $crew = $crewsBySeed->get($seedNumber);
+                if (!$crew) {
+                    continue;
+                }
+                CrewResult::create([
+                    'race_result_id' => $race->id,
+                    'crew_id' => $crew->id,
+                    'lane' => $lane,
+                    'status' => null,
+                ]);
+                $result->crewLanesAssigned++;
+            }
         }
 
-        $result->racesPerDiscipline[$discipline->id] = 1;
+        $result->racesPerDiscipline[$discipline->id] = $flightCount;
+    }
+
+    /**
+     * Resolve the per-race team limit for a long-distance discipline from the
+     * event's boat-group settings. "Small" boat groups use long_race_max_small,
+     * everything else long_race_max_standard (matching FleetConfig). A null/0
+     * limit means unlimited (one Final with all crews).
+     */
+    private function longRaceTeamLimit(Event $event, Discipline $discipline): ?int
+    {
+        $isSmall = strtolower(trim((string) $discipline->boat_group)) === 'small';
+        $limit = (int) ($isSmall ? $event->long_race_max_small : $event->long_race_max_standard);
+        return $limit > 0 ? $limit : null;
+    }
+
+    /**
+     * Split seeds 1..crewCount into $flightCount flights, serpentine by seed so
+     * flight sizes differ by at most one and each flight is balanced in
+     * strength. Each returned flight is a list of seed numbers in ascending
+     * (strongest-first) order.
+     *
+     * @return array<int, list<int>>
+     */
+    private function splitSeedsIntoFlights(int $crewCount, int $flightCount): array
+    {
+        $flights = array_fill(0, max(1, $flightCount), []);
+        if ($flightCount <= 1) {
+            $flights[0] = $crewCount > 0 ? range(1, $crewCount) : [];
+            return $flights;
+        }
+
+        $f = 0;
+        $dir = 1;
+        for ($seed = 1; $seed <= $crewCount; $seed++) {
+            $flights[$f][] = $seed;
+            $f += $dir;
+            if ($f >= $flightCount) {
+                $f = $flightCount - 1;
+                $dir = -1;
+            } elseif ($f < 0) {
+                $f = 0;
+                $dir = 1;
+            }
+        }
+        return $flights;
+    }
+
+    /**
+     * Map a flight's seeds to lanes. Centre-out (fastest in the centre) when the
+     * flight fits the course; sequential 1..N when the flight exceeds laneCount
+     * (long-distance mass start — no crew is dropped).
+     *
+     * @param list<int> $flightSeeds ascending (strongest-first) seed numbers
+     * @return array<int, int> lane => seed_number
+     */
+    private function flightLaneSeeding(array $flightSeeds, int $laneCount): array
+    {
+        $assignment = [];
+        if (count($flightSeeds) > $laneCount) {
+            foreach ($flightSeeds as $idx => $seed) {
+                $assignment[$idx + 1] = $seed;
+            }
+            return $assignment;
+        }
+
+        $order = $this->centreOutLaneOrder($laneCount);
+        foreach ($flightSeeds as $idx => $seed) {
+            $assignment[$order[$idx]] = $seed;
+        }
+        return $assignment;
+    }
+
+    /**
+     * Centre-out lane order per IDBF: for even lane counts the "centre" lane is
+     * the LOWER of the two middle lanes (lane 2 of 4, lane 3 of 6, lane 4 of 8),
+     * then alternate RIGHT, LEFT. So 4 lanes → [2,3,1,4]; 6 → [3,4,2,5,1,6];
+     * 8 → [4,5,3,6,2,7,1,8]. Fewer crews than lanes always leave the outside
+     * (highest lane numbers) empty, never lane 1.
+     *
+     * @return list<int> lanes in centre-out order
+     */
+    private function centreOutLaneOrder(int $laneCount): array
+    {
+        $centre = intdiv($laneCount + 1, 2);
+        $order = [$centre];
+        for ($d = 1; $d < $laneCount; $d++) {
+            $right = $centre + $d;
+            $left = $centre - $d;
+            if ($right <= $laneCount) {
+                $order[] = $right;
+            }
+            if ($left >= 1) {
+                $order[] = $left;
+            }
+        }
+        return $order;
     }
 
     /**
@@ -1424,23 +1526,7 @@ class ScheduleGeneratorService
             return $assignment;
         }
 
-        // Centre-out lane order per IDBF: for even lane counts the "centre"
-        // lane is the LOWER of the two middle lanes (lane 2 of 4, lane 3 of
-        // 6, lane 4 of 8), then alternate RIGHT, LEFT. So 4 lanes →
-        // [2,3,1,4]; 6 → [3,4,2,5,1,6]; 8 → [4,5,3,6,2,7,1,8]. Empty lanes
-        // always end up on the outside (highest lane number), never lane 1.
-        $centre = intdiv($laneCount + 1, 2);
-        $order = [$centre];
-        for ($d = 1; $d < $laneCount; $d++) {
-            $right = $centre + $d;
-            $left = $centre - $d;
-            if ($right <= $laneCount) {
-                $order[] = $right;
-            }
-            if ($left >= 1) {
-                $order[] = $left;
-            }
-        }
+        $order = $this->centreOutLaneOrder($laneCount);
 
         // Per-round rotation so crews don't always sit in the same lane.
         $seeds = range(1, $crewCount);

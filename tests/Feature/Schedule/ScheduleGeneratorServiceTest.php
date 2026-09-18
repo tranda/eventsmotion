@@ -352,6 +352,56 @@ class ScheduleGeneratorServiceTest extends TestCase
         $this->assertSame(8, $race->crewResults()->count());
     }
 
+    public function test_long_distance_splits_into_flights_over_team_limit(): void
+    {
+        // 2000m Standard, limit 6 boats, 14 crews → ceil(14/6) = 3 flights,
+        // staged "Final 1..3", balanced sizes (≤6 each), all 14 crews placed.
+        $event = $this->makeEvent(laneCount: 6);
+        $event->update(['long_race_max_standard' => 6]);
+        $this->addBlock($event, 'Morning', '09:00:00');
+        $discipline = $this->makeDiscipline($event, 14, distance: '2000m');
+
+        $result = $this->service->generate($event);
+
+        $this->assertSame(3, $result->racesPerDiscipline[$discipline->id]);
+        $races = RaceResult::where('discipline_id', $discipline->id)->orderBy('stage')->get();
+        $this->assertSame(['Final 1', 'Final 2', 'Final 3'], $races->pluck('stage')->sort()->values()->all());
+
+        $sizes = $races->map(fn ($r) => $r->crewResults()->count());
+        $this->assertSame(14, $sizes->sum());              // nobody dropped
+        $this->assertLessThanOrEqual(1, $sizes->max() - $sizes->min()); // balanced
+        $this->assertLessThanOrEqual(6, $sizes->max());    // within the limit
+    }
+
+    public function test_long_distance_limit_is_per_boat_group(): void
+    {
+        // Small limit 4 must apply to a Small discipline even though the
+        // Standard limit is large. 10 crews / 4 → 3 flights (not 1).
+        $event = $this->makeEvent(laneCount: 6);
+        $event->update(['long_race_max_small' => 4, 'long_race_max_standard' => 99]);
+        $this->addBlock($event, 'Morning', '09:00:00');
+        $discipline = $this->makeDiscipline($event, 10, distance: '2000m', boatGroup: 'Small');
+
+        $result = $this->service->generate($event);
+
+        $this->assertSame(3, $result->racesPerDiscipline[$discipline->id]);
+    }
+
+    public function test_long_distance_single_final_when_within_limit(): void
+    {
+        // Limit set but the field fits (6 crews ≤ limit 10) → one "Final".
+        $event = $this->makeEvent(laneCount: 6);
+        $event->update(['long_race_max_standard' => 10]);
+        $this->addBlock($event, 'Morning', '09:00:00');
+        $discipline = $this->makeDiscipline($event, 6, distance: '2000m');
+
+        $this->service->generate($event);
+
+        $races = RaceResult::where('discipline_id', $discipline->id)->get();
+        $this->assertSame(['Final'], $races->pluck('stage')->all());
+        $this->assertSame(6, $races->first()->crewResults()->count());
+    }
+
     public function test_1000m_is_not_forced_to_final(): void
     {
         // Exactly 1000m keeps the normal, configurable behaviour: with
@@ -407,14 +457,14 @@ class ScheduleGeneratorServiceTest extends TestCase
         ]);
     }
 
-    private function makeDiscipline(Event $event, int $crewCount, string $gender = 'M', string $distance = '200m'): Discipline
+    private function makeDiscipline(Event $event, int $crewCount, string $gender = 'M', string $distance = '200m', string $boatGroup = 'Standard'): Discipline
     {
         $discipline = Discipline::create([
             'event_id' => $event->id,
             'distance' => $distance,
             'age_group' => 'Senior',
             'gender_group' => $gender,
-            'boat_group' => 'Standard',
+            'boat_group' => $boatGroup,
             'status' => 'active',
         ]);
         for ($i = 0; $i < $crewCount; $i++) {

@@ -41,6 +41,8 @@ class ScheduleConfigController extends BaseController
                 'lane_count' => $event->lane_count,
                 'hulls_small' => $event->hulls_small ?? '',
                 'hulls_standard' => $event->hulls_standard ?? '',
+                'long_race_max_small' => $event->long_race_max_small,
+                'long_race_max_standard' => $event->long_race_max_standard,
                 'default_rounds' => $event->default_rounds ?? 3,
                 'min_crews_per_race' => $event->min_crews_per_race ?? 3,
                 'color_map' => $event->color_map,
@@ -88,6 +90,11 @@ class ScheduleConfigController extends BaseController
             // FleetConfig, which trims/uppercases/dedupes.
             'hulls_small' => 'sometimes|nullable|string|max:64',
             'hulls_standard' => 'sometimes|nullable|string|max:64',
+            // Max teams per long-distance (>1000m) race, per boat group.
+            // Null/0 = unlimited (one Final with all crews); above the limit
+            // the generator splits the field into balanced flights.
+            'long_race_max_small' => 'sometimes|nullable|integer|min:0|max:255',
+            'long_race_max_standard' => 'sometimes|nullable|integer|min:0|max:255',
             // Free-form JSON map { category => { value => hex_color } }.
             // Validated shallowly here; the frontend owns the schema.
             'color_map' => 'sometimes|nullable|array',
@@ -96,7 +103,7 @@ class ScheduleConfigController extends BaseController
         $event->update($validated);
 
         return $this->sendResponse(
-            $event->only(['id', 'lane_count', 'hulls_small', 'hulls_standard', 'default_rounds', 'min_crews_per_race', 'color_map', 'schedule_status']),
+            $event->only(['id', 'lane_count', 'hulls_small', 'hulls_standard', 'long_race_max_small', 'long_race_max_standard', 'default_rounds', 'min_crews_per_race', 'color_map', 'schedule_status']),
             'Schedule config updated.',
         );
     }

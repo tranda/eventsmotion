@@ -34,6 +34,8 @@ class Event extends Model
         'lane_count',
         'hulls_small',
         'hulls_standard',
+        'long_race_max_small',
+        'long_race_max_standard',
         'default_rounds',
         'min_crews_per_race',
         'color_map',
@@ -52,6 +54,8 @@ class Event extends Model
         'lane_count' => 'integer',
         'default_rounds' => 'integer',
         'min_crews_per_race' => 'integer',
+        'long_race_max_small' => 'integer',
+        'long_race_max_standard' => 'integer',
         'color_map' => 'array',
     ];
 
