@@ -286,6 +286,38 @@ class ScheduleGeneratorServiceTest extends TestCase
         $this->service->generate($event->fresh());
     }
 
+    public function test_single_round_discipline_is_staged_final(): void
+    {
+        // crewCount (4) <= laneCount (6) with default_rounds=1 takes the
+        // ROUNDS path and produces exactly one race. A lone round decides the
+        // discipline, so it must be staged "Final", not "Round 1".
+        $event = $this->makeEvent(laneCount: 6);
+        $event->update(['default_rounds' => 1]);
+        $this->addBlock($event, 'Morning', '09:00:00');
+        $discipline = $this->makeDiscipline($event, 4);
+
+        $result = $this->service->generate($event);
+
+        $this->assertSame(1, $result->racesPerDiscipline[$discipline->id]);
+        $races = RaceResult::where('discipline_id', $discipline->id)->get();
+        $this->assertSame(['Final'], $races->pluck('stage')->all());
+    }
+
+    public function test_multi_round_discipline_keeps_round_stage_names(): void
+    {
+        // With more than one round the stages stay "Round k" — only the
+        // single-round case collapses to "Final".
+        $event = $this->makeEvent(laneCount: 6);
+        $event->update(['default_rounds' => 3]);
+        $this->addBlock($event, 'Morning', '09:00:00');
+        $discipline = $this->makeDiscipline($event, 4);
+
+        $this->service->generate($event);
+
+        $races = RaceResult::where('discipline_id', $discipline->id)->orderBy('id')->get();
+        $this->assertSame(['Round 1', 'Round 2', 'Round 3'], $races->pluck('stage')->all());
+    }
+
     // ----- helpers -----
 
     private function makeEvent(int $laneCount): Event

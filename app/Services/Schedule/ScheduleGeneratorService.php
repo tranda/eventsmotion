@@ -1298,11 +1298,17 @@ class ScheduleGeneratorService
 
         $disciplineRaceCount = 0;
         for ($r = 1; $r <= $rounds; $r++) {
+            // A single-round discipline has no "next round" to accumulate
+            // against — the one race decides it, so it IS the final. Staging
+            // it "Final" (an exact match in RaceResult::isFinalRound) gives it
+            // medal/final-standings treatment and groups it in the finals wave
+            // (StagePhase 300). Multi-round formats keep "Round k".
+            $stage = $rounds === 1 ? 'Final' : "Round {$r}";
             $race = RaceResult::create([
                 'race_number' => 0, // renumbered later
                 'discipline_id' => $discipline->id,
                 'race_time' => null,
-                'stage' => "Round {$r}",
+                'stage' => $stage,
                 'status' => 'SCHEDULED',
             ]);
             $disciplineRaceCount++;
