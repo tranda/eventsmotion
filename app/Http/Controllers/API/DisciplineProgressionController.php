@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\API;
 
 use App\Http\Controllers\API\BaseController as BaseController;
+use App\Models\Crew;
 use App\Models\Discipline;
 use App\Models\DisciplineProgression;
 use App\Services\Schedule\IdbfRacePlans;
@@ -110,6 +111,83 @@ class DisciplineProgressionController extends BaseController
     }
 
     /**
+     * PUT /api/disciplines/{id}/combine
+     * Pair THIS discipline (the secondary) to race together with a host, or
+     * clear the pairing. Body:
+     *   { "combined_with_discipline_id": 42 }    // race with discipline 42
+     *   { "combined_with_discipline_id": null }  // stand alone again
+     *
+     * v1 constraints: pairwise only, same event + boat_group + distance, the
+     * merged field must fit one race (<= lane_count), the host must itself be
+     * standalone, and this discipline must not already be a host.
+     */
+    public function combine(Request $request, $disciplineId)
+    {
+        $discipline = Discipline::with('event')->find($disciplineId);
+        if (!$discipline) {
+            return $this->sendError('Discipline not found', [], 404);
+        }
+
+        $validated = $request->validate([
+            'combined_with_discipline_id' => 'present|nullable|integer',
+        ]);
+        $hostId = $validated['combined_with_discipline_id'];
+
+        if ($hostId === null) {
+            $discipline->update(['combined_with_discipline_id' => null]);
+            return $this->sendResponse(
+                ['discipline_id' => $discipline->id, 'combined_with_discipline_id' => null],
+                'Combination cleared.'
+            );
+        }
+
+        if ((int) $hostId === (int) $discipline->id) {
+            return $this->sendError('A discipline cannot be combined with itself.', [], 422);
+        }
+
+        $host = Discipline::find($hostId);
+        if (!$host) {
+            return $this->sendError('Host discipline not found.', [], 404);
+        }
+        if ((int) $host->event_id !== (int) $discipline->event_id) {
+            return $this->sendError('Combined disciplines must be in the same event.', [], 422);
+        }
+        if (strcasecmp((string) $host->boat_group, (string) $discipline->boat_group) !== 0
+            || (string) $host->distance !== (string) $discipline->distance) {
+            return $this->sendError('Combined disciplines must share boat group and distance.', [], 422);
+        }
+        if ($host->combined_with_discipline_id !== null) {
+            return $this->sendError('The host discipline is itself combined with another — pick a standalone host.', [], 422);
+        }
+        if (Discipline::where('combined_with_discipline_id', $discipline->id)->exists()) {
+            return $this->sendError('This discipline is already a host for another category; clear that first.', [], 422);
+        }
+
+        // Merged field must fit a single race.
+        $laneCount = (int) (optional($discipline->event)->lane_count ?? 0);
+        $merged = $host->crews()->count()
+            + $discipline->crews()->count()
+            + Crew::whereIn('discipline_id', function ($q) use ($host) {
+                $q->select('id')->from('disciplines')->where('combined_with_discipline_id', $host->id);
+            })->count();
+        if ($laneCount > 0 && $merged > $laneCount) {
+            return $this->sendError(
+                "Combined field has {$merged} crews but only {$laneCount} lanes — too many to race together.",
+                [],
+                422
+            );
+        }
+
+        $discipline->update(['combined_with_discipline_id' => $host->id]);
+
+        return $this->sendResponse([
+            'discipline_id' => $discipline->id,
+            'combined_with_discipline_id' => $host->id,
+            'host_name' => $host->getDisplayName(),
+        ], 'Combination set.');
+    }
+
+    /**
      * GET /api/events/{event}/plan-and-seeds
      * Bulk endpoint for the Plan & Seeds tab: returns active disciplines
      * with their progression + race-plan options in a single payload, so the
@@ -186,6 +264,7 @@ class DisciplineProgressionController extends BaseController
                 'distance' => $d->distance,
                 'competition' => $d->competition,
                 'status' => $d->status,
+                'combined_with_discipline_id' => $d->combined_with_discipline_id,
                 'predicted_day' => $predictedDay,
                 'progression' => [
                     'discipline_id' => $d->id,

@@ -169,6 +169,7 @@ Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::get('events/{event}/plan-and-seeds', [DisciplineProgressionController::class, 'bulkForEvent']);
     Route::get('disciplines/{discipline}/progression', [DisciplineProgressionController::class, 'show']);
     Route::put('disciplines/{discipline}/progression', [DisciplineProgressionController::class, 'update']);
+    Route::put('disciplines/{discipline}/combine', [DisciplineProgressionController::class, 'combine']);
     Route::get('disciplines/{discipline}/race-plan-options', [DisciplineProgressionController::class, 'options']);
     Route::get('disciplines/{discipline}/crew-seeds', [CrewSeedController::class, 'show']);
     Route::put('disciplines/{discipline}/crew-seeds', [CrewSeedController::class, 'update']);

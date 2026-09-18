@@ -527,6 +527,85 @@ class ScheduleGeneratorServiceTest extends TestCase
         return $ga === 'mixed' || $gb === 'mixed' || $ga === $gb;
     }
 
+    public function test_combined_categories_generate_one_final_with_both(): void
+    {
+        // Senior C (1 crew) paired to race with Senior A (2 crews). The host
+        // produces ONE shared Final with all 3 crews; the secondary makes no
+        // race of its own.
+        $event = $this->makeEvent(laneCount: 6);
+        $this->addBlock($event, 'Morning', '09:00:00');
+        $host = $this->makeDiscipline($event, 2, 'Open', '200m', 'Small', 'Senior A');
+        $sec = $this->makeDiscipline($event, 1, 'Open', '200m', 'Small', 'Senior C');
+        $sec->update(['combined_with_discipline_id' => $host->id]);
+
+        $this->service->generate($event);
+
+        $this->assertSame(0, RaceResult::where('discipline_id', $sec->id)->count());
+        $races = RaceResult::where('discipline_id', $host->id)->get();
+        $this->assertCount(1, $races);
+        $this->assertSame('Final', $races->first()->stage);
+        $this->assertSame(3, $races->first()->crewResults()->count());
+    }
+
+    public function test_combined_categories_score_each_category_separately(): void
+    {
+        $event = $this->makeEvent(laneCount: 6);
+        $this->addBlock($event, 'Morning', '09:00:00');
+        $host = $this->makeDiscipline($event, 2, 'Open', '200m', 'Small', 'Senior A');
+        $sec = $this->makeDiscipline($event, 1, 'Open', '200m', 'Small', 'Senior C');
+        $sec->update(['combined_with_discipline_id' => $host->id]);
+        $this->service->generate($event);
+
+        $race = RaceResult::with('crewResults.crew')->where('discipline_id', $host->id)->first();
+        $t = 100000;
+        foreach ($race->crewResults as $cr) {
+            $cr->update(['status' => 'FINISHED', 'time_ms' => $t]);
+            $t += 1000;
+        }
+        $race->load('crewResults.crew');
+
+        // Both categories are visible in the one race.
+        $this->assertEqualsCanonicalizing([$host->id, $sec->id], $race->categoryDisciplineIds()->all());
+
+        // Each category is scored among ITS OWN crews only.
+        $aTimes = $race->getFinalTimesForDiscipline($host->id);
+        $cTimes = $race->getFinalTimesForDiscipline($sec->id);
+        $this->assertSame(2, $aTimes->count());
+        $this->assertSame(1, $cTimes->count());
+        $this->assertSame(2, $race->finalStandingCrewResults($host->id)->count());
+        $this->assertSame(1, $race->finalStandingCrewResults($sec->id)->count());
+
+        foreach ($aTimes->keys() as $crewId) {
+            $this->assertSame($host->id, Crew::find($crewId)->discipline_id);
+        }
+        foreach ($cTimes->keys() as $crewId) {
+            $this->assertSame($sec->id, Crew::find($crewId)->discipline_id);
+        }
+    }
+
+    public function test_normal_race_reports_single_category(): void
+    {
+        // Regression guard: a normal race has exactly one category and the
+        // unscoped final times equal the host-scoped ones.
+        $event = $this->makeEvent(laneCount: 6);
+        $event->update(['default_rounds' => 1]);
+        $this->addBlock($event, 'Morning', '09:00:00');
+        $d = $this->makeDiscipline($event, 4, 'Open', '200m', 'Small', 'Senior A');
+        $this->service->generate($event);
+
+        $race = RaceResult::with('crewResults.crew')->where('discipline_id', $d->id)->first();
+        foreach ($race->crewResults as $i => $cr) {
+            $cr->update(['status' => 'FINISHED', 'time_ms' => 100000 + $i * 1000]);
+        }
+        $race->load('crewResults.crew');
+
+        $this->assertSame([$d->id], $race->categoryDisciplineIds()->all());
+        $this->assertEquals(
+            $race->getFinalTimesForDiscipline()->toArray(),
+            $race->getFinalTimesForDiscipline($d->id)->toArray(),
+        );
+    }
+
     // ----- helpers -----
 
     private function makeEvent(int $laneCount): Event

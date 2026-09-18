@@ -356,11 +356,34 @@ class PublicController extends BaseController
 
                     // For final rounds, calculate final times and manually add them to existing crew results
                     if ($isFinalRound) {
-                        $finalTimes = $raceResult->getFinalTimesForDiscipline();
-
                         // Ensure crew_results relationship is loaded
                         if (!$raceResult->relationLoaded('crewResults')) {
                             $raceResult->load('crewResults.crew.team');
+                        }
+
+                        // Compute final times PER category (crew->discipline_id).
+                        // For a normal race there is one category (null scope) so
+                        // this equals getFinalTimesForDiscipline() exactly; for a
+                        // combined race it unions every category AND assigns a
+                        // category_position ranked within each category.
+                        $categoryIds = $raceResult->categoryDisciplineIds();
+                        $isCombined = $categoryIds->count() > 1;
+                        $finalTimes = collect();
+                        foreach ($categoryIds as $catId) {
+                            $scope = $isCombined ? (int) $catId : null;
+                            $catTimes = $raceResult->getFinalTimesForDiscipline($scope);
+                            $pos = 1;
+                            $rankByCrew = [];
+                            foreach (
+                                $catTimes
+                                    ->filter(fn($v) => ($v['final_status'] ?? null) === 'FINISHED' && ($v['final_time_ms'] ?? null) !== null)
+                                    ->sortBy(fn($v) => $v['final_time_ms']) as $crewId => $_
+                            ) {
+                                $rankByCrew[$crewId] = $pos++;
+                            }
+                            foreach ($catTimes as $crewId => $data) {
+                                $finalTimes->put($crewId, $data + ['category_position' => $rankByCrew[$crewId] ?? null]);
+                            }
                         }
 
                         // Add final time fields to existing crew_results
@@ -369,9 +392,11 @@ class PublicController extends BaseController
                             if ($finalData) {
                                 $crewResult->setAttribute('final_time_ms', $finalData['final_time_ms']);
                                 $crewResult->setAttribute('final_status', $finalData['final_status']);
+                                $crewResult->setAttribute('category_position', $finalData['category_position'] ?? null);
                             } else {
                                 $crewResult->setAttribute('final_time_ms', null);
                                 $crewResult->setAttribute('final_status', null);
+                                $crewResult->setAttribute('category_position', null);
                             }
                             $crewResult->setAttribute('is_final_round', true);
                         });
@@ -381,6 +406,7 @@ class PublicController extends BaseController
                             $raceResult->crewResults->each(function($crewResult) {
                                 $crewResult->setAttribute('final_time_ms', null);
                                 $crewResult->setAttribute('final_status', null);
+                                $crewResult->setAttribute('category_position', null);
                                 $crewResult->setAttribute('is_final_round', false);
                             });
                         }
@@ -389,7 +415,7 @@ class PublicController extends BaseController
                     // Make sure the final time fields are appended to JSON
                     if ($raceResult->relationLoaded('crewResults')) {
                         $raceResult->crewResults->each(function($crewResult) {
-                            $crewResult->append(['final_time_ms', 'final_status', 'is_final_round']);
+                            $crewResult->append(['final_time_ms', 'final_status', 'is_final_round', 'category_position']);
                         });
                     }
 
@@ -632,68 +658,81 @@ class PublicController extends BaseController
                 }
             }
 
+            $disciplineById = $disciplines->keyBy('id');
+
             foreach ($raceResults as $race) {
                 if (!$race->isFinalRound()) continue;
 
-                // Match the pre-populate rule: null competition only becomes
-                // "Overall" when no discipline in the event has a real one.
-                $competition = $race->discipline?->competition;
-                if (empty($competition)) {
-                    if ($anyCompetitionSet) continue;
-                    $competition = 'Overall';
-                }
+                // A combined race holds crews from >1 category; award medals
+                // SEPARATELY per category (each ranked among its own crews,
+                // bucketed by its own competition). A normal race has exactly
+                // one category → the loop runs once with null scope = today.
+                $categoryIds = $race->categoryDisciplineIds();
+                $isCombined = $categoryIds->count() > 1;
 
-                // Rank crews by their medal-worthy time. getFinalTimesForDiscipline
-                // returns [crew_id => ['final_time_ms' => int, 'final_status' => str]]
-                // with the correct semantics per plan type.
-                $finalTimes = $race->getFinalTimesForDiscipline();
+                foreach ($categoryIds as $catId) {
+                    $scope = $isCombined ? (int) $catId : null;
+                    $catDiscipline = $disciplineById->get($catId) ?? $race->discipline;
 
-                // Pool crews across all flights for a flighted long-distance
-                // final so medals rank the whole field, not each flight's top 3.
-                // For every other final this is just $race->crewResults.
-                $medalists = $race->finalStandingCrewResults()
-                    ->filter(function ($cr) use ($finalTimes) {
-                        $ft = $finalTimes->get($cr->crew_id);
-                        return $ft
-                            && ($ft['final_status'] ?? null) === 'FINISHED'
-                            && ($ft['final_time_ms'] ?? null) !== null;
-                    })
-                    ->sortBy(function ($cr) use ($finalTimes) {
-                        return $finalTimes->get($cr->crew_id)['final_time_ms'];
-                    })
-                    ->values()
-                    ->take(3);
-
-                foreach ($medalists as $i => $cr) {
-                    $team = $cr->crew?->team;
-                    if (!$team) continue;
-
-                    $club = $team->club;
-                    $clubId = $club?->id;
-                    $displayName = $club?->name ?? $team->name;
-                    if (!$displayName) continue;
-
-                    // Group key: prefer club_id; fall back to name so
-                    // team-only records still sum among themselves.
-                    $groupKey = $clubId !== null ? "club:{$clubId}" : "team:{$displayName}";
-
-                    if (!isset($byCompetition[$competition])) {
-                        $byCompetition[$competition] = [];
-                    }
-                    if (!isset($byCompetition[$competition][$groupKey])) {
-                        $byCompetition[$competition][$groupKey] = [
-                            'club_id' => $clubId,
-                            'club_name' => $displayName,
-                            'country' => $club?->country,
-                            'gold' => 0,
-                            'silver' => 0,
-                            'bronze' => 0,
-                        ];
+                    // Match the pre-populate rule: null competition only becomes
+                    // "Overall" when no discipline in the event has a real one.
+                    $competition = $catDiscipline?->competition;
+                    if (empty($competition)) {
+                        if ($anyCompetitionSet) continue;
+                        $competition = 'Overall';
                     }
 
-                    if ($i === 0) $byCompetition[$competition][$groupKey]['gold']++;
-                    elseif ($i === 1) $byCompetition[$competition][$groupKey]['silver']++;
-                    elseif ($i === 2) $byCompetition[$competition][$groupKey]['bronze']++;
+                    // Rank crews by their medal-worthy time, scoped to this
+                    // category. getFinalTimesForDiscipline returns
+                    // [crew_id => ['final_time_ms', 'final_status']].
+                    $finalTimes = $race->getFinalTimesForDiscipline($scope);
+
+                    // Pool crews across all flights for a flighted long-distance
+                    // final so medals rank the whole field, not each flight's top 3.
+                    $medalists = $race->finalStandingCrewResults($scope)
+                        ->filter(function ($cr) use ($finalTimes) {
+                            $ft = $finalTimes->get($cr->crew_id);
+                            return $ft
+                                && ($ft['final_status'] ?? null) === 'FINISHED'
+                                && ($ft['final_time_ms'] ?? null) !== null;
+                        })
+                        ->sortBy(function ($cr) use ($finalTimes) {
+                            return $finalTimes->get($cr->crew_id)['final_time_ms'];
+                        })
+                        ->values()
+                        ->take(3);
+
+                    foreach ($medalists as $i => $cr) {
+                        $team = $cr->crew?->team;
+                        if (!$team) continue;
+
+                        $club = $team->club;
+                        $clubId = $club?->id;
+                        $displayName = $club?->name ?? $team->name;
+                        if (!$displayName) continue;
+
+                        // Group key: prefer club_id; fall back to name so
+                        // team-only records still sum among themselves.
+                        $groupKey = $clubId !== null ? "club:{$clubId}" : "team:{$displayName}";
+
+                        if (!isset($byCompetition[$competition])) {
+                            $byCompetition[$competition] = [];
+                        }
+                        if (!isset($byCompetition[$competition][$groupKey])) {
+                            $byCompetition[$competition][$groupKey] = [
+                                'club_id' => $clubId,
+                                'club_name' => $displayName,
+                                'country' => $club?->country,
+                                'gold' => 0,
+                                'silver' => 0,
+                                'bronze' => 0,
+                            ];
+                        }
+
+                        if ($i === 0) $byCompetition[$competition][$groupKey]['gold']++;
+                        elseif ($i === 1) $byCompetition[$competition][$groupKey]['silver']++;
+                        elseif ($i === 2) $byCompetition[$competition][$groupKey]['bronze']++;
+                    }
                 }
             }
 

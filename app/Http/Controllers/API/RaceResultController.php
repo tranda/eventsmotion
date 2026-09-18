@@ -76,6 +76,7 @@ class RaceResultController extends BaseController
                             'discipline',
                             'crewResults' => $crewLaneFilter,
                             'crewResults.crew.team.club',
+                            'crewResults.crew.discipline',
                         ])->forEvent($eventId)
                     )
                 )

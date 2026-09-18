@@ -394,9 +394,14 @@ class RaceResult extends Model
      *
      * Returns a collection keyed by crew_id with final_time_ms and final_status.
      */
-    public function getFinalTimesForDiscipline()
+    public function getFinalTimesForDiscipline(?int $categoryId = null)
     {
         $finalTimes = collect();
+        // For a combined race holding crews from >1 category, $categoryId scopes
+        // the result to one category (ranked among its own crews). Normal races
+        // pass null → every crew counts → behaviour is byte-for-byte unchanged.
+        $inCategory = fn ($cr) => $categoryId === null
+            || (int) optional($cr->crew)->discipline_id === $categoryId;
         $isRoundBased = $this->shouldShowAccumulatedTime();
 
         if ($isRoundBased) {
@@ -418,7 +423,7 @@ class RaceResult extends Model
             $totalRounds = $allRaceResults->count();
 
             $allCrewIds = $allRaceResults
-                ->flatMap(fn($r) => $r->crewResults->pluck('crew_id'))
+                ->flatMap(fn($r) => $r->crewResults->filter($inCategory)->pluck('crew_id'))
                 ->unique();
 
             foreach ($allCrewIds as $crewId) {
@@ -461,7 +466,7 @@ class RaceResult extends Model
                 ->get();
 
             foreach ($flightRaces as $race) {
-                foreach ($race->crewResults as $cr) {
+                foreach ($race->crewResults->filter($inCategory) as $cr) {
                     if ($cr->status === 'DSQ') {
                         $finalTimes->put($cr->crew_id, ['final_time_ms' => null, 'final_status' => 'DSQ']);
                     } elseif ($cr->status === 'FINISHED' && $cr->time_ms && $cr->time_ms > 0) {
@@ -476,7 +481,7 @@ class RaceResult extends Model
             // Heat-based plan: only the Grand Final time counts. Use the
             // current race's crew results — we are by definition on the
             // final race of the discipline.
-            foreach ($this->crewResults as $cr) {
+            foreach ($this->crewResults->filter($inCategory) as $cr) {
                 if ($cr->status === 'DSQ') {
                     $finalTimes->put($cr->crew_id, ['final_time_ms' => null, 'final_status' => 'DSQ']);
                 } elseif ($cr->status === 'FINISHED' && $cr->time_ms && $cr->time_ms > 0) {
@@ -515,19 +520,44 @@ class RaceResult extends Model
      * otherwise just this race's own crews (round-based finals already carry the
      * whole field, since every crew races every round).
      */
-    public function finalStandingCrewResults()
+    public function finalStandingCrewResults(?int $categoryId = null)
     {
         if ($this->isFlightedFinal()) {
-            return RaceResult::where('discipline_id', $this->discipline_id)
+            $base = RaceResult::where('discipline_id', $this->discipline_id)
                 ->where('status', '!=', 'CANCELLED')
                 ->where('stage', 'like', 'Final %')
                 ->with('crewResults.crew.team.club')
                 ->get()
                 ->flatMap(fn($r) => $r->crewResults)
                 ->values();
+        } else {
+            $base = $this->crewResults;
         }
 
-        return $this->crewResults;
+        if ($categoryId !== null) {
+            $base = $base
+                ->filter(fn ($cr) => (int) optional($cr->crew)->discipline_id === $categoryId)
+                ->values();
+        }
+
+        return $base;
+    }
+
+    /**
+     * Distinct crew categories (crew->discipline_id) actually present in this
+     * race. For a normal single-category race this is one element (the host);
+     * for a combined race it lists every joined category. Falls back to the
+     * race's own discipline_id when crews aren't loaded/available.
+     */
+    public function categoryDisciplineIds()
+    {
+        $ids = $this->crewResults
+            ->map(fn ($cr) => optional($cr->crew)->discipline_id)
+            ->filter()
+            ->unique()
+            ->values();
+
+        return $ids->isEmpty() ? collect([$this->discipline_id]) : $ids;
     }
 
     /**
