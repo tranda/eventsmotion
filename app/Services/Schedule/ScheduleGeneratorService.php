@@ -174,12 +174,12 @@ class ScheduleGeneratorService
             if ($day === null) {
                 // Full-event regenerate: wipe all SCHEDULED races.
                 $this->deleteScheduledRaces($event);
-                // Sweep stale auto-inserted boarding breaks — the next
+                // Sweep stale auto-inserted breaks (Boarding + Rest) — the next
                 // placement pass will insert fresh ones where needed.
                 // Manual/named breaks (lunch, ceremonies) are left alone.
                 RaceResult::where('event_id', $event->id)
                     ->where('entry_type', 'break')
-                    ->where('label', 'like', 'auto: Boarding%')
+                    ->where('label', 'like', 'auto: %')
                     ->delete();
             } else {
                 // Per-day regenerate: wipe only the targeted disciplines'
@@ -188,12 +188,12 @@ class ScheduleGeneratorService
                 RaceResult::whereIn('discipline_id', $disciplineIds)
                     ->where('status', 'SCHEDULED')
                     ->delete();
-                // Sweep auto-boarding breaks landing on this day.
+                // Sweep auto breaks (Boarding + Rest) landing on this day.
                 $dayStart = Carbon::parse("{$day} 00:00:00");
                 $dayEnd = $dayStart->copy()->addDay();
                 RaceResult::where('event_id', $event->id)
                     ->where('entry_type', 'break')
-                    ->where('label', 'like', 'auto: Boarding%')
+                    ->where('label', 'like', 'auto: %')
                     ->whereBetween('race_time', [$dayStart, $dayEnd])
                     ->delete();
             }
@@ -742,9 +742,11 @@ class ScheduleGeneratorService
             ->orderBy('id')
             ->get();
 
-        // Bucket new races by matching block, then apply wave ordering
-        // within each block: (phase, discipline_id, stage_number). Races
-        // with no matching block get a warning and are left unplaced.
+        // Bucket new races by matching block, then order each block: phases
+        // stay in sequence (all heats before reps before finals) and, within a
+        // phase, races are interleaved so paddler-sharing races never run
+        // back-to-back (see orderRacesWithinBlock). Races with no matching
+        // block get a warning and are left unplaced.
         $racesPerBlock = [];
         foreach ($newRaces as $race) {
             $block = $this->findMatchingBlock($race, $orderedBlocks);
@@ -757,24 +759,12 @@ class ScheduleGeneratorService
             $racesPerBlock[$block->id][] = ['race' => $race, 'block' => $block];
         }
         foreach ($racesPerBlock as $blockId => &$rows) {
-            usort($rows, function ($a, $b) {
-                $ra = $a['race'];
-                $rb = $b['race'];
-                $pa = StagePhase::of((string) $ra->stage);
-                $pb = StagePhase::of((string) $rb->stage);
-                if ($pa !== $pb) return $pa <=> $pb;
-                if ($ra->discipline_id !== $rb->discipline_id) {
-                    return $ra->discipline_id <=> $rb->discipline_id;
-                }
-                $sa = StagePhase::stageNumber((string) $ra->stage);
-                $sb = StagePhase::stageNumber((string) $rb->stage);
-                if ($sa !== $sb) return $sa <=> $sb;
-                return ($ra->id ?? 0) <=> ($rb->id ?? 0);
-            });
+            $rows = $this->orderRacesWithinBlock($rows);
         }
         unset($rows);
 
         $warnedBoatGroups = [];
+        $warnedRestGroups = [];
         // Per-discipline last-placed race across the whole event so the
         // boarding-gap rule and the 2-hour soft-warn can look back across
         // block boundaries. Key = discipline_id, value = ['time' => Carbon,
@@ -809,6 +799,32 @@ class ScheduleGeneratorService
                     $cursor = Carbon::parse($dateStr . ' ' . $block->start_time);
                 } else {
                     $cursor = $latest->copy()->addSeconds($block->gap_seconds);
+                }
+
+                // Athlete-rest break: the interleave couldn't avoid placing two
+                // paddler-sharing races back-to-back (a lopsided block), so drop
+                // a rest break in front of this one so those paddlers still get
+                // a slot's recovery. Never at the very start of a block.
+                if (!empty($row['rest_break']) && $latest !== null) {
+                    $breakStart = $cursor->copy();
+                    $cursor = $cursor->copy()->addSeconds($block->gap_seconds);
+                    $ag = trim((string) (optional($race->discipline)->age_group ?? ''));
+                    RaceResult::create([
+                        'event_id' => $event->id,
+                        'entry_type' => 'break',
+                        'stage' => '',
+                        'race_time' => $breakStart,
+                        'duration_seconds' => (int) $block->gap_seconds,
+                        'label' => trim("auto: Rest · {$ag} back-to-back"),
+                        'shift_subsequent' => false,
+                        'status' => 'SCHEDULED',
+                    ]);
+                    if ($ag !== '' && !isset($warnedRestGroups[$ag])) {
+                        $result->addWarning(
+                            "{$ag}: too many paddler-sharing races in one block to fully separate — inserted rest break(s)."
+                        );
+                        $warnedRestGroups[$ag] = true;
+                    }
                 }
 
                 // Boarding-gap rule: when this discipline's previous race
@@ -900,6 +916,151 @@ class ScheduleGeneratorService
                 ];
             }
         }
+    }
+
+    /**
+     * Order a block's races. Phases stay in sequence (all heats before reps
+     * before finals); within each phase the races are interleaved so
+     * paddler-sharing races never run back-to-back.
+     *
+     * @param array $rows list of ['race'=>RaceResult,'block'=>ScheduleBlock]
+     * @return array reordered rows, each with an added 'rest_break' bool
+     */
+    private function orderRacesWithinBlock(array $rows): array
+    {
+        $byPhase = [];
+        foreach ($rows as $row) {
+            $ph = StagePhase::of((string) $row['race']->stage);
+            $byPhase[$ph][] = $row;
+        }
+        ksort($byPhase);
+
+        $ordered = [];
+        foreach ($byPhase as $phaseRows) {
+            foreach ($this->interleaveByAthletePool($phaseRows) as $row) {
+                $ordered[] = $row;
+            }
+        }
+        return $ordered;
+    }
+
+    /**
+     * Reorder one phase's races so no two paddler-sharing races run
+     * consecutively. Greedy: at each step pick, among races that do NOT
+     * conflict with the previous one, the race whose age group has the most
+     * remaining entries (so we don't strand a big group at the end),
+     * preferring a different boat group for variety, then discipline id /
+     * stage number for stable output.
+     *
+     * When every remaining race conflicts with the previous one (a lopsided
+     * block that can't be fully separated), the picked race is flagged
+     * 'rest_break' so the placement loop drops a rest break in front of it.
+     *
+     * @param array $rows list of ['race'=>RaceResult,'block'=>ScheduleBlock]
+     * @return array reordered rows, each with a 'rest_break' bool
+     */
+    private function interleaveByAthletePool(array $rows): array
+    {
+        $remaining = array_values($rows);
+        $ordered = [];
+        $prev = null; // RaceResult
+
+        while (!empty($remaining)) {
+            $counts = [];
+            foreach ($remaining as $r) {
+                $ag = strtolower(trim((string) optional($r['race']->discipline)->age_group));
+                $counts[$ag] = ($counts[$ag] ?? 0) + 1;
+            }
+
+            $candidates = [];
+            foreach ($remaining as $i => $r) {
+                if ($prev === null || !$this->racesConflict($prev, $r['race'])) {
+                    $candidates[] = $i;
+                }
+            }
+            $forcedBreak = false;
+            if (empty($candidates)) {
+                // Everything left conflicts with the previous race — place one
+                // anyway, with a rest break in front of it.
+                $candidates = array_keys($remaining);
+                $forcedBreak = true;
+            }
+
+            usort($candidates, function ($x, $y) use ($remaining, $counts, $prev) {
+                $rx = $remaining[$x]['race'];
+                $ry = $remaining[$y]['race'];
+                $agx = strtolower(trim((string) optional($rx->discipline)->age_group));
+                $agy = strtolower(trim((string) optional($ry->discipline)->age_group));
+                if ($counts[$agx] !== $counts[$agy]) {
+                    return $counts[$agy] <=> $counts[$agx]; // biggest group first
+                }
+                if ($prev !== null) {
+                    $sameX = strcasecmp((string) optional($rx->discipline)->boat_group, (string) optional($prev->discipline)->boat_group) === 0 ? 1 : 0;
+                    $sameY = strcasecmp((string) optional($ry->discipline)->boat_group, (string) optional($prev->discipline)->boat_group) === 0 ? 1 : 0;
+                    if ($sameX !== $sameY) {
+                        return $sameX <=> $sameY; // prefer a different boat group
+                    }
+                }
+                if ($rx->discipline_id !== $ry->discipline_id) {
+                    return $rx->discipline_id <=> $ry->discipline_id;
+                }
+                return StagePhase::stageNumber((string) $rx->stage) <=> StagePhase::stageNumber((string) $ry->stage);
+            });
+
+            $pick = $candidates[0];
+            $row = $remaining[$pick];
+            $row['rest_break'] = $forcedBreak;
+            $ordered[] = $row;
+            $prev = $row['race'];
+            unset($remaining[$pick]);
+            $remaining = array_values($remaining);
+        }
+
+        return $ordered;
+    }
+
+    /**
+     * Two races share paddlers (and must not run back-to-back) when they are
+     * DIFFERENT disciplines in the SAME age group whose gender pools overlap.
+     * Same discipline = different crews per race → never a conflict.
+     */
+    private function racesConflict(RaceResult $a, RaceResult $b): bool
+    {
+        if ($a->discipline_id === $b->discipline_id) {
+            return false;
+        }
+        $da = $a->discipline;
+        $db = $b->discipline;
+        if (!$da || !$db) {
+            return false;
+        }
+        if (strcasecmp((string) $da->age_group, (string) $db->age_group) !== 0) {
+            return false;
+        }
+        return $this->gendersOverlap((string) $da->gender_group, (string) $db->gender_group);
+    }
+
+    /**
+     * Whether two gender groups share paddlers. Mixed boats carry both genders,
+     * so Mixed overlaps everything; Open (men) and Women don't overlap each
+     * other; identical groups overlap themselves. Accepts the various stored
+     * spellings ("Mixed"/"Mix"/"X", "Open"/"M", "Women"/"W").
+     */
+    private function gendersOverlap(string $g1, string $g2): bool
+    {
+        $canon = function (string $g): string {
+            $g = strtolower(trim($g));
+            if (in_array($g, ['mixed', 'mix', 'x'], true)) return 'mixed';
+            if (in_array($g, ['women', 'w', 'ladies', 'female'], true)) return 'women';
+            if (in_array($g, ['open', 'm', 'men', 'male'], true)) return 'open';
+            return $g; // unknown group overlaps only an identical unknown
+        };
+        $a = $canon($g1);
+        $b = $canon($g2);
+        if ($a === 'mixed' || $b === 'mixed') {
+            return true;
+        }
+        return $a === $b;
     }
 
     /**

@@ -417,6 +417,116 @@ class ScheduleGeneratorServiceTest extends TestCase
         $this->assertSame(['Round 1', 'Round 2', 'Round 3'], $races->pluck('stage')->all());
     }
 
+    public function test_ordering_spreads_paddler_sharing_races(): void
+    {
+        // The reported case: Senior A ×4 (Mixed×2, Women, Open) + Senior B ×2
+        // (Mixed, Women), all 200m, one Final each (default_rounds=1). Cross-age
+        // never conflicts; within an age Mixed shares with everyone but
+        // Open↔Women don't. This is fully separable with ZERO rest breaks.
+        $event = $this->makeEvent(laneCount: 6);
+        $event->update(['default_rounds' => 1]);
+        $this->addBlock($event, 'Morning', '09:00:00');
+
+        $this->makeDiscipline($event, 4, 'Mixed', '200m', 'Standard', 'Senior A');
+        $this->makeDiscipline($event, 4, 'Mixed', '200m', 'Small', 'Senior A');
+        $this->makeDiscipline($event, 4, 'Women', '200m', 'Small', 'Senior A');
+        $this->makeDiscipline($event, 4, 'Open', '200m', 'Small', 'Senior A');
+        $this->makeDiscipline($event, 4, 'Mixed', '200m', 'Small', 'Senior B');
+        $this->makeDiscipline($event, 4, 'Women', '200m', 'Small', 'Senior B');
+
+        $this->service->generate($event);
+
+        // No forced rest breaks were needed.
+        $this->assertSame(0, RaceResult::where('event_id', $event->id)
+            ->where('entry_type', 'break')
+            ->where('label', 'like', 'auto: Rest%')
+            ->count());
+
+        $this->assertNoAdjacentPaddlerSharing($event);
+    }
+
+    public function test_open_and_women_may_run_consecutively(): void
+    {
+        // Only Senior A Open + Senior A Women: they don't share paddlers, so
+        // they can sit back-to-back with no rest break.
+        $event = $this->makeEvent(laneCount: 6);
+        $event->update(['default_rounds' => 1]);
+        $this->addBlock($event, 'Morning', '09:00:00');
+        $this->makeDiscipline($event, 4, 'Open', '200m', 'Small', 'Senior A');
+        $this->makeDiscipline($event, 4, 'Women', '200m', 'Small', 'Senior A');
+
+        $this->service->generate($event);
+
+        $this->assertSame(0, RaceResult::where('event_id', $event->id)
+            ->where('entry_type', 'break')
+            ->where('label', 'like', 'auto: Rest%')
+            ->count());
+        // Both finals placed, and they're allowed to be consecutive.
+        $this->assertSame(2, RaceResult::whereHas('discipline', fn ($q) => $q->where('event_id', $event->id))
+            ->where('status', 'SCHEDULED')
+            ->whereNotNull('race_time')
+            ->count());
+    }
+
+    public function test_lopsided_block_inserts_rest_breaks(): void
+    {
+        // Three Senior A Mixed disciplines (distinct by distance) all share
+        // paddlers pairwise — impossible to separate, so two rest breaks are
+        // forced: A · rest · A · rest · A.
+        $event = $this->makeEvent(laneCount: 6);
+        $event->update(['default_rounds' => 1]);
+        $this->addBlock($event, 'Morning', '09:00:00');
+        $this->makeDiscipline($event, 4, 'Mixed', '200m', 'Small', 'Senior A');
+        $this->makeDiscipline($event, 4, 'Mixed', '500m', 'Small', 'Senior A');
+        $this->makeDiscipline($event, 4, 'Mixed', '2000m', 'Small', 'Senior A');
+
+        $result = $this->service->generate($event);
+
+        $this->assertSame(2, RaceResult::where('event_id', $event->id)
+            ->where('entry_type', 'break')
+            ->where('label', 'like', 'auto: Rest%')
+            ->count());
+        $this->assertNotEmpty($result->warnings);
+    }
+
+    /** Assert no two consecutive placed races (by time) share paddlers. */
+    private function assertNoAdjacentPaddlerSharing(Event $event): void
+    {
+        $races = RaceResult::whereHas('discipline', fn ($q) => $q->where('event_id', $event->id))
+            ->where('status', 'SCHEDULED')
+            ->whereNotNull('race_time')
+            ->with('discipline')
+            ->orderBy('race_time')
+            ->orderBy('id')
+            ->get()
+            ->filter(fn ($r) => $r->discipline_id !== null)
+            ->values();
+
+        for ($i = 1; $i < $races->count(); $i++) {
+            $a = $races[$i - 1];
+            $b = $races[$i];
+            $this->assertFalse(
+                $this->testPaddlersShare($a, $b),
+                "Races {$a->stage} ({$a->discipline->getDisplayName()}) and "
+                . "{$b->stage} ({$b->discipline->getDisplayName()}) share paddlers but are consecutive.",
+            );
+        }
+    }
+
+    private function testPaddlersShare(RaceResult $a, RaceResult $b): bool
+    {
+        if ($a->discipline_id === $b->discipline_id) return false;
+        if (strcasecmp((string) $a->discipline->age_group, (string) $b->discipline->age_group) !== 0) return false;
+        $canon = fn (string $g) => match (strtolower(trim($g))) {
+            'mixed', 'mix', 'x' => 'mixed',
+            'women', 'w' => 'women',
+            default => 'open',
+        };
+        $ga = $canon((string) $a->discipline->gender_group);
+        $gb = $canon((string) $b->discipline->gender_group);
+        return $ga === 'mixed' || $gb === 'mixed' || $ga === $gb;
+    }
+
     // ----- helpers -----
 
     private function makeEvent(int $laneCount): Event
@@ -457,12 +567,12 @@ class ScheduleGeneratorServiceTest extends TestCase
         ]);
     }
 
-    private function makeDiscipline(Event $event, int $crewCount, string $gender = 'M', string $distance = '200m', string $boatGroup = 'Standard'): Discipline
+    private function makeDiscipline(Event $event, int $crewCount, string $gender = 'M', string $distance = '200m', string $boatGroup = 'Standard', string $ageGroup = 'Senior'): Discipline
     {
         $discipline = Discipline::create([
             'event_id' => $event->id,
             'distance' => $distance,
-            'age_group' => 'Senior',
+            'age_group' => $ageGroup,
             'gender_group' => $gender,
             'boat_group' => $boatGroup,
             'status' => 'active',
