@@ -448,6 +448,30 @@ class RaceResult extends Model
                     ]);
                 }
             }
+        } elseif ($this->isFlightedFinal()) {
+            // Long-distance flighted final: the field is split across
+            // "Final 1".."Final N" (more crews than boats). Each crew raced
+            // exactly once, so its standing is its single time — pooled across
+            // every flight and ranked together (time-trial). CANCELLED flights
+            // are excluded.
+            $flightRaces = RaceResult::where('discipline_id', $this->discipline_id)
+                ->where('status', '!=', 'CANCELLED')
+                ->where('stage', 'like', 'Final %')
+                ->with('crewResults')
+                ->get();
+
+            foreach ($flightRaces as $race) {
+                foreach ($race->crewResults as $cr) {
+                    if ($cr->status === 'DSQ') {
+                        $finalTimes->put($cr->crew_id, ['final_time_ms' => null, 'final_status' => 'DSQ']);
+                    } elseif ($cr->status === 'FINISHED' && $cr->time_ms && $cr->time_ms > 0) {
+                        $finalTimes->put($cr->crew_id, [
+                            'final_time_ms' => $cr->time_ms,
+                            'final_status' => 'FINISHED',
+                        ]);
+                    }
+                }
+            }
         } else {
             // Heat-based plan: only the Grand Final time counts. Use the
             // current race's crew results — we are by definition on the
@@ -465,6 +489,45 @@ class RaceResult extends Model
         }
 
         return $finalTimes;
+    }
+
+    /**
+     * True when this race is one flight of a long-distance final that was split
+     * across "Final 1".."Final N" (more crews than boats). Detected by a
+     * numbered "Final N" stage with more than one such race in the discipline.
+     * A single bare "Final" is NOT flighted.
+     */
+    public function isFlightedFinal()
+    {
+        if (!preg_match('/^Final\s+\d+$/i', (string) $this->stage)) {
+            return false;
+        }
+
+        return RaceResult::where('discipline_id', $this->discipline_id)
+            ->where('status', '!=', 'CANCELLED')
+            ->where('stage', 'like', 'Final %')
+            ->count() > 1;
+    }
+
+    /**
+     * The crew results that decide this discipline's final standing. For a
+     * flighted long-distance final that is every flight's crews pooled together;
+     * otherwise just this race's own crews (round-based finals already carry the
+     * whole field, since every crew races every round).
+     */
+    public function finalStandingCrewResults()
+    {
+        if ($this->isFlightedFinal()) {
+            return RaceResult::where('discipline_id', $this->discipline_id)
+                ->where('status', '!=', 'CANCELLED')
+                ->where('stage', 'like', 'Final %')
+                ->with('crewResults.crew.team.club')
+                ->get()
+                ->flatMap(fn($r) => $r->crewResults)
+                ->values();
+        }
+
+        return $this->crewResults;
     }
 
     /**

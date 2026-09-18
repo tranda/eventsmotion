@@ -648,7 +648,10 @@ class PublicController extends BaseController
                 // with the correct semantics per plan type.
                 $finalTimes = $race->getFinalTimesForDiscipline();
 
-                $medalists = $race->crewResults
+                // Pool crews across all flights for a flighted long-distance
+                // final so medals rank the whole field, not each flight's top 3.
+                // For every other final this is just $race->crewResults.
+                $medalists = $race->finalStandingCrewResults()
                     ->filter(function ($cr) use ($finalTimes) {
                         $ft = $finalTimes->get($cr->crew_id);
                         return $ft
