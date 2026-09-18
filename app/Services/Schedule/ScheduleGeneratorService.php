@@ -505,6 +505,22 @@ class ScheduleGeneratorService
             return;
         }
 
+        // Long-distance rule: disciplines LONGER than 1000m (1500m, 2000m, …)
+        // are always a single decisive Final — no heats/rounds — regardless of
+        // crew count or default_rounds. Exactly 1000m keeps the normal,
+        // per-event-configurable behaviour (falls through to the ROUNDS/plan
+        // paths below). (int) parses both "2000m" and a bare "2000". Explicit
+        // plan-code overrides still win.
+        if (!$override && (int) $discipline->distance > 1000) {
+            $this->generateSingleFinalForDiscipline(
+                $discipline,
+                $laneCount,
+                $crewCount,
+                $result,
+            );
+            return;
+        }
+
         // ROUNDS plan: when all crews fit on the course (crewCount <= laneCount)
         // we don't need elimination structure (heats/repechages/semis). Create
         // N rounds with all crews racing each round, centre-out lane seeding,
@@ -1332,6 +1348,67 @@ class ScheduleGeneratorService
             }
         }
         $result->racesPerDiscipline[$discipline->id] = $disciplineRaceCount;
+    }
+
+    /**
+     * Generate a single "Final" race with every crew racing together. Used for
+     * long-distance disciplines (> 1000m), which are always one decisive final.
+     *
+     * When the crews fit on the course (crewCount <= laneCount) we reuse the
+     * centre-out lane convention. When there are MORE crews than lanes (a
+     * mass-start long-distance final) every crew still races in the one Final —
+     * lanes are then assigned sequentially by seed (lane 1 = seed 1, …) so no
+     * crew is dropped, even though lane numbers exceed laneCount.
+     */
+    private function generateSingleFinalForDiscipline(
+        Discipline $discipline,
+        int $laneCount,
+        int $crewCount,
+        GenerationResult $result,
+    ): void {
+        $this->ensureCrewSeeds($discipline, $discipline->crews()->orderBy('id')->get());
+        $crews = $discipline->crews()->orderBy('id')->get();
+        $crewsBySeed = $crews->keyBy('seed_number');
+
+        $race = RaceResult::create([
+            'race_number' => 0, // renumbered later
+            'discipline_id' => $discipline->id,
+            'race_time' => null,
+            'stage' => 'Final',
+            'status' => 'SCHEDULED',
+        ]);
+        $result->racesCreated++;
+
+        if ($crewCount <= $laneCount) {
+            // Fits on the course: centre-out seeding (fastest in the centre).
+            $laneSeeding = $this->roundLaneSeeding($laneCount, $crewCount, 1);
+        } else {
+            // More crews than lanes: mass-start final, everyone races. Assign
+            // lanes 1..crewCount by seed order so nobody is left out.
+            $laneSeeding = [];
+            for ($seed = 1; $seed <= $crewCount; $seed++) {
+                $laneSeeding[$seed] = $seed; // lane => seed_number
+            }
+        }
+
+        foreach ($laneSeeding as $lane => $seedNumber) {
+            if ($seedNumber === null) {
+                continue;
+            }
+            $crew = $crewsBySeed->get($seedNumber);
+            if (!$crew) {
+                continue;
+            }
+            CrewResult::create([
+                'race_result_id' => $race->id,
+                'crew_id' => $crew->id,
+                'lane' => $lane,
+                'status' => null,
+            ]);
+            $result->crewLanesAssigned++;
+        }
+
+        $result->racesPerDiscipline[$discipline->id] = 1;
     }
 
     /**

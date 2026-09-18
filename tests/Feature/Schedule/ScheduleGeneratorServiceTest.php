@@ -318,6 +318,55 @@ class ScheduleGeneratorServiceTest extends TestCase
         $this->assertSame(['Round 1', 'Round 2', 'Round 3'], $races->pluck('stage')->all());
     }
 
+    public function test_long_distance_over_1000m_is_single_final(): void
+    {
+        // 2000m: longer than 1000m → always one Final, no rounds/heats, even
+        // with default_rounds > 1. Fits on the course here (4 crews / 6 lanes).
+        $event = $this->makeEvent(laneCount: 6);
+        $event->update(['default_rounds' => 3]);
+        $this->addBlock($event, 'Morning', '09:00:00');
+        $discipline = $this->makeDiscipline($event, 4, distance: '2000m');
+
+        $result = $this->service->generate($event);
+
+        $this->assertSame(1, $result->racesPerDiscipline[$discipline->id]);
+        $races = RaceResult::where('discipline_id', $discipline->id)->get();
+        $this->assertSame(['Final'], $races->pluck('stage')->all());
+        // All four crews placed in the one Final.
+        $this->assertSame(4, $races->first()->crewResults()->count());
+    }
+
+    public function test_long_distance_final_places_all_crews_when_over_lane_count(): void
+    {
+        // 2000m mass-start final with more crews (8) than lanes (6): every crew
+        // still races in the one Final; nobody is dropped.
+        $event = $this->makeEvent(laneCount: 6);
+        $this->addBlock($event, 'Morning', '09:00:00');
+        $discipline = $this->makeDiscipline($event, 8, distance: '2000m');
+
+        $result = $this->service->generate($event);
+
+        $this->assertSame(1, $result->racesPerDiscipline[$discipline->id]);
+        $race = RaceResult::where('discipline_id', $discipline->id)->first();
+        $this->assertSame('Final', $race->stage);
+        $this->assertSame(8, $race->crewResults()->count());
+    }
+
+    public function test_1000m_is_not_forced_to_final(): void
+    {
+        // Exactly 1000m keeps the normal, configurable behaviour: with
+        // default_rounds=3 and crews that fit, it stays a 3-round format.
+        $event = $this->makeEvent(laneCount: 6);
+        $event->update(['default_rounds' => 3]);
+        $this->addBlock($event, 'Morning', '09:00:00');
+        $discipline = $this->makeDiscipline($event, 4, distance: '1000m');
+
+        $this->service->generate($event);
+
+        $races = RaceResult::where('discipline_id', $discipline->id)->orderBy('id')->get();
+        $this->assertSame(['Round 1', 'Round 2', 'Round 3'], $races->pluck('stage')->all());
+    }
+
     // ----- helpers -----
 
     private function makeEvent(int $laneCount): Event
