@@ -155,8 +155,8 @@ Route::middleware('auth:sanctum')->post('race-results/{raceResultId}/crew-result
 Route::middleware('auth:sanctum')->delete('race-results/{raceResultId}/crew-results', [RaceResultController::class, 'clearCrewResults']);
 Route::middleware('auth:sanctum')->post('race-results/{raceResultId}/recalculate-positions', [RaceResultController::class, 'recalculatePositions']);
 
-// Schedule Builder (admin only)
-Route::middleware(['auth:sanctum', 'admin'])->group(function () {
+// Schedule Builder — Event Managers and up (access_level >= 2)
+Route::middleware(['auth:sanctum', 'minlevel:2'])->group(function () {
     // Schedule config: lane count + days + blocks
     Route::get('events/{event}/schedule-config', [ScheduleConfigController::class, 'show']);
     Route::put('events/{event}/schedule-config', [ScheduleConfigController::class, 'update']);
