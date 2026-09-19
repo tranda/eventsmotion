@@ -187,4 +187,15 @@ class CrewResult extends Model
     {
         return $this->attributes['is_final_round'] ?? false;
     }
+
+    /**
+     * Accessor for category_position attribute.
+     * Set dynamically for combined-category final rounds (rank within the
+     * crew's own category); null for normal races. Required because
+     * PublicController appends 'category_position' to the JSON output.
+     */
+    public function getCategoryPositionAttribute()
+    {
+        return $this->attributes['category_position'] ?? null;
+    }
 }
