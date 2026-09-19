@@ -67,21 +67,25 @@ Route::get('clubs', [ClubController::class, 'getAllClubs']);
 Route::get('clubsAdel', [ClubController::class, 'getAllClubsForAdel']);
 Route::middleware('auth:sanctum')->get('clubDetails', [ClubController::class, 'getClubDetails']);
 Route::post('clubAndUser', [ClubController::class, 'createClubAndUser']);
-Route::middleware(['auth:sanctum', 'admin'])->post('clubs', [ClubController::class, 'createClub']);
-Route::middleware(['auth:sanctum', 'admin'])->put('clubs/{id}', [ClubController::class, 'updateClub']);
-Route::middleware(['auth:sanctum', 'admin'])->delete('clubs/{id}', [ClubController::class, 'deleteClub']);
+// Club CRUD — Event Managers and up (access_level >= 2)
+Route::middleware(['auth:sanctum', 'minlevel:2'])->post('clubs', [ClubController::class, 'createClub']);
+Route::middleware(['auth:sanctum', 'minlevel:2'])->put('clubs/{id}', [ClubController::class, 'updateClub']);
+Route::middleware(['auth:sanctum', 'minlevel:2'])->delete('clubs/{id}', [ClubController::class, 'deleteClub']);
 
 // Event Routes - Public access for caching before login
 Route::get('events', [EventController::class, 'getAllEvents']);
 
-// Event CRUD routes (Admin only)
-Route::middleware(['auth:sanctum', 'admin'])->group(function () {
+// Event CRUD routes — Event Managers and up (access_level >= 2)
+Route::middleware(['auth:sanctum', 'minlevel:2'])->group(function () {
     Route::get('events/list', [EventController::class, 'index']);
     Route::get('event/{id}', [EventController::class, 'show']);
     Route::post('event', [EventController::class, 'store']);
     Route::put('event/{id}', [EventController::class, 'update']);
     Route::delete('event/{id}', [EventController::class, 'destroy']);
+});
 
+// API keys + database backups — Admin only (access_level >= 3)
+Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     // API Key Management routes (Admin only)
     Route::get('api-keys', [ApiKeyController::class, 'index']);
     Route::get('api-keys/{id}', [ApiKeyController::class, 'show']);
@@ -103,8 +107,8 @@ Route::middleware('auth:sanctum')->get('disciplines', [DisciplineController::cla
 Route::middleware('auth:sanctum')->get('disciplinesCombined', [DisciplineController::class, 'getDisciplinesForCombinedClubs']);
 Route::middleware('auth:sanctum')->get('teamDisciplines', [DisciplineController::class, 'getDisciplinesForTeam']);
 
-// Discipline CRUD routes (Admin only)
-Route::middleware(['auth:sanctum', 'admin'])->group(function () {
+// Discipline CRUD routes — Event Managers and up (access_level >= 2)
+Route::middleware(['auth:sanctum', 'minlevel:2'])->group(function () {
     Route::get('discipline/{id}', [DisciplineController::class, 'show']);
     Route::post('discipline', [DisciplineController::class, 'store']);
     Route::put('discipline/{id}', [DisciplineController::class, 'update']);
@@ -115,8 +119,8 @@ Route::get('teamsAll', [TeamController::class, 'getAllTeams']);
 Route::middleware('auth:sanctum')->get('teams', [TeamController::class, 'getTeamsForClub']);
 Route::middleware('auth:sanctum')->get('teamsForDiscipline', [TeamController::class, 'getTeamsForDiscipline']);
 Route::middleware('auth:sanctum')->post('team', [TeamController::class, 'createTeam']);
-Route::middleware(['auth:sanctum', 'admin'])->put('teams/{id}', [TeamController::class, 'updateTeam']);
-Route::middleware(['auth:sanctum', 'admin'])->delete('teams/{id}', [TeamController::class, 'deleteTeam']);
+Route::middleware(['auth:sanctum', 'minlevel:2'])->put('teams/{id}', [TeamController::class, 'updateTeam']);
+Route::middleware(['auth:sanctum', 'minlevel:2'])->delete('teams/{id}', [TeamController::class, 'deleteTeam']);
 // Toggle active/inactive - admins or club managers of the team's own club
 Route::middleware('auth:sanctum')->patch('teams/{id}/active', [TeamController::class, 'setTeamActive']);
 
