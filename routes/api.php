@@ -155,8 +155,10 @@ Route::middleware('auth:sanctum')->post('race-results/{raceResultId}/crew-result
 Route::middleware('auth:sanctum')->delete('race-results/{raceResultId}/crew-results', [RaceResultController::class, 'clearCrewResults']);
 Route::middleware('auth:sanctum')->post('race-results/{raceResultId}/recalculate-positions', [RaceResultController::class, 'recalculatePositions']);
 
-// Schedule Builder — Event Managers and up (access_level >= 2)
-Route::middleware(['auth:sanctum', 'minlevel:2'])->group(function () {
+// Schedule Builder — Referees and up (access_level >= 1). The frontend limits
+// referees (level 1) to the Grid tab; Event Managers (>= 2) get all tabs.
+// Backend stays open at >= 1 so every Grid action works for referees.
+Route::middleware(['auth:sanctum', 'minlevel:1'])->group(function () {
     // Schedule config: lane count + days + blocks
     Route::get('events/{event}/schedule-config', [ScheduleConfigController::class, 'show']);
     Route::put('events/{event}/schedule-config', [ScheduleConfigController::class, 'update']);
