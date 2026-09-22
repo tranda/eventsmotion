@@ -82,7 +82,7 @@ class ScheduleConfigController extends BaseController
         }
 
         $validated = $request->validate([
-            'lane_count' => 'sometimes|integer|in:3,4,6,8,9',
+            'lane_count' => 'sometimes|integer|in:3,4,5,6,8,9',
             'default_rounds' => 'sometimes|integer|min:1|max:10',
             'min_crews_per_race' => 'sometimes|integer|min:1|max:20',
             // Comma list of hull letters (e.g. "D,E,F"). Empty string
