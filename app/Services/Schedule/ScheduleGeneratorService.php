@@ -944,87 +944,92 @@ class ScheduleGeneratorService
     }
 
     /**
-     * Order a block's races. Phases stay in sequence (all heats before reps
-     * before finals); within each phase the races are interleaved so
-     * paddler-sharing races never run back-to-back.
+     * Order a block's races. Phase order (all heats → all repechages → all
+     * finals) is the default, but REST takes priority: a discipline's next
+     * stage that is a NEW phase (heat→rep, rep→final) may not run until at
+     * least COOLDOWN other races have run since its previous stage — so Finals
+     * are pulled forward just enough to keep e.g. 2 races between a crew's
+     * heats and its repechage, and between its repechage and grand final.
+     *
+     * Greedy: keep each discipline's stage order; at each step pick, among the
+     * disciplines whose next stage's cooldown is satisfied, the lowest-phase
+     * race (keeps heats→reps→finals), preferring one that doesn't share
+     * paddlers with the previous race (age+gender overlap), then a different
+     * boat group, then discipline/stage. A forced paddler clash flags
+     * 'rest_break' (a time break in front). If nothing is eligible (a tiny
+     * block with no fillers), fall back to best effort so we never deadlock —
+     * the boarding-gap time rule still gives those crews rest.
      *
      * @param array $rows list of ['race'=>RaceResult,'block'=>ScheduleBlock]
      * @return array reordered rows, each with an added 'rest_break' bool
      */
     private function orderRacesWithinBlock(array $rows): array
     {
-        $byPhase = [];
+        // ≥2 other races must sit between a discipline's phase transitions.
+        $cooldown = 2;
+
+        // One ordered chain per discipline (by phase, then stage number).
+        $chains = [];
         foreach ($rows as $row) {
-            $ph = StagePhase::of((string) $row['race']->stage);
-            $byPhase[$ph][] = $row;
+            $chains[$row['race']->discipline_id][] = $row;
         }
-        ksort($byPhase);
+        foreach ($chains as &$chain) {
+            usort($chain, function ($a, $b) {
+                $pa = StagePhase::of((string) $a['race']->stage);
+                $pb = StagePhase::of((string) $b['race']->stage);
+                if ($pa !== $pb) return $pa <=> $pb;
+                return StagePhase::stageNumber((string) $a['race']->stage)
+                    <=> StagePhase::stageNumber((string) $b['race']->stage);
+            });
+        }
+        unset($chain);
+
+        $ptr = [];        // discipline_id → index into its chain
+        $lastPos = [];    // discipline_id → global position of its last emitted race
+        $lastPhase = [];  // discipline_id → phase of its last emitted race
+        foreach ($chains as $did => $_) {
+            $ptr[$did] = 0;
+        }
 
         $ordered = [];
-        foreach ($byPhase as $phaseRows) {
-            foreach ($this->interleaveByAthletePool($phaseRows) as $row) {
-                $ordered[] = $row;
-            }
-        }
-        return $ordered;
-    }
+        $prev = null;     // last emitted RaceResult (for paddler-spread)
+        $pos = 0;
+        $total = count($rows);
 
-    /**
-     * Reorder one phase's races so no two paddler-sharing races run
-     * consecutively. Greedy: at each step pick, among races that do NOT
-     * conflict with the previous one, the race whose age group has the most
-     * remaining entries (so we don't strand a big group at the end),
-     * preferring a different boat group for variety, then discipline id /
-     * stage number for stable output.
-     *
-     * When every remaining race conflicts with the previous one (a lopsided
-     * block that can't be fully separated), the picked race is flagged
-     * 'rest_break' so the placement loop drops a rest break in front of it.
-     *
-     * @param array $rows list of ['race'=>RaceResult,'block'=>ScheduleBlock]
-     * @return array reordered rows, each with a 'rest_break' bool
-     */
-    private function interleaveByAthletePool(array $rows): array
-    {
-        $remaining = array_values($rows);
-        $ordered = [];
-        $prev = null; // RaceResult
-
-        while (!empty($remaining)) {
-            $counts = [];
-            foreach ($remaining as $r) {
-                $ag = strtolower(trim((string) optional($r['race']->discipline)->age_group));
-                $counts[$ag] = ($counts[$ag] ?? 0) + 1;
-            }
-
-            $candidates = [];
-            foreach ($remaining as $i => $r) {
-                if ($prev === null || !$this->racesConflict($prev, $r['race'])) {
-                    $candidates[] = $i;
+        while (count($ordered) < $total) {
+            $eligible = [];
+            $remaining = [];
+            foreach ($chains as $did => $chain) {
+                if ($ptr[$did] >= count($chain)) {
+                    continue;
+                }
+                $remaining[] = $did;
+                $phase = StagePhase::of((string) $chain[$ptr[$did]]['race']->stage);
+                $ready = !isset($lastPhase[$did])            // first stage of the chain
+                    || $phase === $lastPhase[$did]           // same phase → no cooldown
+                    || ($pos - $lastPos[$did]) > $cooldown;  // ≥ cooldown races since last stage
+                if ($ready) {
+                    $eligible[] = $did;
                 }
             }
-            $forcedBreak = false;
-            if (empty($candidates)) {
-                // Everything left conflicts with the previous race — place one
-                // anyway, with a rest break in front of it.
-                $candidates = array_keys($remaining);
-                $forcedBreak = true;
-            }
 
-            usort($candidates, function ($x, $y) use ($remaining, $counts, $prev) {
-                $rx = $remaining[$x]['race'];
-                $ry = $remaining[$y]['race'];
-                $agx = strtolower(trim((string) optional($rx->discipline)->age_group));
-                $agy = strtolower(trim((string) optional($ry->discipline)->age_group));
-                if ($counts[$agx] !== $counts[$agy]) {
-                    return $counts[$agy] <=> $counts[$agx]; // biggest group first
-                }
+            // Nothing eligible → a block with no filler races to cover a
+            // cooldown. Emit best effort (lowest phase) so we never deadlock.
+            $pool = empty($eligible) ? $remaining : $eligible;
+
+            usort($pool, function ($x, $y) use ($chains, $ptr, $prev) {
+                $rx = $chains[$x][$ptr[$x]]['race'];
+                $ry = $chains[$y][$ptr[$y]]['race'];
+                $px = StagePhase::of((string) $rx->stage);
+                $py = StagePhase::of((string) $ry->stage);
+                if ($px !== $py) return $px <=> $py; // lowest phase first
                 if ($prev !== null) {
-                    $sameX = strcasecmp((string) optional($rx->discipline)->boat_group, (string) optional($prev->discipline)->boat_group) === 0 ? 1 : 0;
-                    $sameY = strcasecmp((string) optional($ry->discipline)->boat_group, (string) optional($prev->discipline)->boat_group) === 0 ? 1 : 0;
-                    if ($sameX !== $sameY) {
-                        return $sameX <=> $sameY; // prefer a different boat group
-                    }
+                    $cx = $this->racesConflict($prev, $rx) ? 1 : 0;
+                    $cy = $this->racesConflict($prev, $ry) ? 1 : 0;
+                    if ($cx !== $cy) return $cx <=> $cy; // prefer no paddler clash
+                    $bx = strcasecmp((string) optional($rx->discipline)->boat_group, (string) optional($prev->discipline)->boat_group) === 0 ? 1 : 0;
+                    $by = strcasecmp((string) optional($ry->discipline)->boat_group, (string) optional($prev->discipline)->boat_group) === 0 ? 1 : 0;
+                    if ($bx !== $by) return $bx <=> $by; // prefer a different boat group
                 }
                 if ($rx->discipline_id !== $ry->discipline_id) {
                     return $rx->discipline_id <=> $ry->discipline_id;
@@ -1032,13 +1037,18 @@ class ScheduleGeneratorService
                 return StagePhase::stageNumber((string) $rx->stage) <=> StagePhase::stageNumber((string) $ry->stage);
             });
 
-            $pick = $candidates[0];
-            $row = $remaining[$pick];
-            $row['rest_break'] = $forcedBreak;
+            $did = $pool[0];
+            $row = $chains[$did][$ptr[$did]];
+            // Rest break in front only for a forced paddler clash (crews who
+            // share athletes running back-to-back).
+            $row['rest_break'] = $prev !== null && $this->racesConflict($prev, $row['race']);
             $ordered[] = $row;
+
+            $lastPos[$did] = $pos;
+            $lastPhase[$did] = StagePhase::of((string) $row['race']->stage);
+            $ptr[$did]++;
             $prev = $row['race'];
-            unset($remaining[$pick]);
-            $remaining = array_values($remaining);
+            $pos++;
         }
 
         return $ordered;

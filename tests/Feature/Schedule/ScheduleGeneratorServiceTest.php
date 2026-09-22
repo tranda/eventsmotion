@@ -606,6 +606,40 @@ class ScheduleGeneratorServiceTest extends TestCase
         );
     }
 
+    public function test_stage_cooldown_keeps_two_races_between_transitions(): void
+    {
+        // A heats/rep/final discipline mixed with plenty of single-final
+        // fillers: the scheduler must keep >=2 other races between its heats
+        // and repechage, and between its repechage and grand final (finals are
+        // pulled forward for rest).
+        $event = $this->makeEvent(laneCount: 3);
+        $event->update(['default_rounds' => 1]);
+        $this->addBlock($event, 'Morning', '09:00:00');
+        $multi = $this->makeDiscipline($event, 5, 'Mixed', '200m', 'Small', 'Senior B');
+        foreach (['Junior A', 'Junior B', 'Master A', 'Master B', 'Master C', 'Master D'] as $age) {
+            $this->makeDiscipline($event, 2, 'Open', '200m', 'Small', $age);
+        }
+
+        $this->service->generate($event);
+
+        $races = RaceResult::whereHas('discipline', fn ($q) => $q->where('event_id', $event->id))
+            ->where('status', 'SCHEDULED')
+            ->whereNotNull('race_time')
+            ->orderBy('race_time')->orderBy('id')
+            ->get()->values();
+        $idx = fn ($stage) => $races->search(
+            fn ($r) => $r->discipline_id === $multi->id && $r->stage === $stage
+        );
+        $heat2 = $idx('Heat 2');
+        $rep = $idx('Repechage 1');
+        $gf = $idx('Grand Final');
+        $this->assertNotFalse($heat2);
+        $this->assertNotFalse($rep);
+        $this->assertNotFalse($gf);
+        $this->assertGreaterThanOrEqual(3, $rep - $heat2, '>=2 races between heats and repechage');
+        $this->assertGreaterThanOrEqual(3, $gf - $rep, '>=2 races between repechage and grand final');
+    }
+
     public function test_five_crews_on_three_lanes_uses_heats_rep_final(): void
     {
         // 5 crews on 3 lanes: no rounds (5 > 3) and previously no IDBF plan
