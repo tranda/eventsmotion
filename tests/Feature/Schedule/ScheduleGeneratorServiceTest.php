@@ -655,6 +655,25 @@ class ScheduleGeneratorServiceTest extends TestCase
         $this->assertGreaterThanOrEqual(3, $gf - $rep, '>=2 races between repechage and grand final');
     }
 
+    public function test_six_crews_on_three_lanes_heats_rep_minor_grand(): void
+    {
+        // 6 crews on 3 lanes: RP.3_3L — 2 heats (3+3), Repechage 1 (heat-2nds),
+        // Minor Final (heat-3rds), Grand Final.
+        $event = $this->makeEvent(laneCount: 3);
+        $this->addBlock($event, 'Morning', '09:00:00');
+        $d = $this->makeDiscipline($event, 6, 'Mixed', '200m', 'Small', 'Senior B');
+
+        $this->service->generate($event);
+
+        $races = RaceResult::where('discipline_id', $d->id)->orderBy('id')->get();
+        $this->assertSame(
+            ['Heat 1', 'Heat 2', 'Repechage 1', 'Minor Final', 'Grand Final'],
+            $races->pluck('stage')->all(),
+        );
+        $this->assertSame(3, $races->firstWhere('stage', 'Heat 1')->crewResults()->count());
+        $this->assertSame(3, $races->firstWhere('stage', 'Heat 2')->crewResults()->count());
+    }
+
     public function test_five_crews_on_three_lanes_uses_heats_rep_final(): void
     {
         // 5 crews on 3 lanes: no rounds (5 > 3) and previously no IDBF plan
