@@ -1650,7 +1650,7 @@ class ScheduleGeneratorService
             ]);
             $result->racesCreated++;
 
-            foreach ($this->flightLaneSeeding($flightSeeds, $laneCount) as $lane => $seedNumber) {
+            foreach ($this->flightLaneSeeding($flightSeeds) as $lane => $seedNumber) {
                 $crew = $crewsBySeed->get($seedNumber);
                 if (!$crew) {
                     continue;
@@ -1714,26 +1714,20 @@ class ScheduleGeneratorService
     }
 
     /**
-     * Map a flight's seeds to lanes. Centre-out (fastest in the centre) when the
-     * flight fits the course; sequential 1..N when the flight exceeds laneCount
-     * (long-distance mass start — no crew is dropped).
+     * Map a long-distance flight's seeds to lanes. Long-distance races seed
+     * sequentially from lane 1 — there is no centre-lane advantage over a long
+     * course, so the fastest seed takes lane 1 and the rest follow in order
+     * (never centre-out). A flight may exceed laneCount (mass start); every
+     * crew still gets a lane.
      *
      * @param list<int> $flightSeeds ascending (strongest-first) seed numbers
      * @return array<int, int> lane => seed_number
      */
-    private function flightLaneSeeding(array $flightSeeds, int $laneCount): array
+    private function flightLaneSeeding(array $flightSeeds): array
     {
         $assignment = [];
-        if (count($flightSeeds) > $laneCount) {
-            foreach ($flightSeeds as $idx => $seed) {
-                $assignment[$idx + 1] = $seed;
-            }
-            return $assignment;
-        }
-
-        $order = $this->centreOutLaneOrder($laneCount);
         foreach ($flightSeeds as $idx => $seed) {
-            $assignment[$order[$idx]] = $seed;
+            $assignment[$idx + 1] = $seed;
         }
         return $assignment;
     }

@@ -352,6 +352,21 @@ class ScheduleGeneratorServiceTest extends TestCase
         $this->assertSame(8, $race->crewResults()->count());
     }
 
+    public function test_long_distance_seeds_sequentially_from_lane_one(): void
+    {
+        // Long-distance: no centre-out — fastest seed in lane 1, then 2, 3, 4…
+        // (centre-out on 6 lanes for 4 crews would give lanes {2,3,4,5}).
+        $event = $this->makeEvent(laneCount: 6);
+        $this->addBlock($event, 'Morning', '09:00:00');
+        $d = $this->makeDiscipline($event, 4, distance: '2000m');
+
+        $this->service->generate($event);
+
+        $race = RaceResult::where('discipline_id', $d->id)->first();
+        $lanes = $race->crewResults()->pluck('lane')->sort()->values()->all();
+        $this->assertSame([1, 2, 3, 4], $lanes);
+    }
+
     public function test_long_distance_splits_into_flights_over_team_limit(): void
     {
         // 2000m Standard, limit 6 boats, 14 crews → ceil(14/6) = 3 flights,
