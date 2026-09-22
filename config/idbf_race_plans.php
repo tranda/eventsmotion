@@ -121,6 +121,110 @@ return [
         ],
     ],
 
+    // 7-9 crews on 3 lanes: 3 heats → winner of each to the semis; the rest to
+    // repechages, whose top finishers fill the remaining semi spots. Two semis
+    // of 3 → Grand Final (1st of each semi + fastest 2nd) and Minor Final (next
+    // three, 4th-6th). Deeper places rank by prior times. Semi seeding is the
+    // same across 7-9; only heat sizes + repechage capacity differ.
+    'RP.4_3L' => [
+        'lane_count' => 3,
+        'crew_count_range' => [7, 7],
+        'stages' => ['Heat 1', 'Heat 2', 'Heat 3', 'Repechage 1', 'Repechage 2', 'Semi 1', 'Semi 2', 'Minor Final', 'Grand Final'],
+        'heat_lane_seeding' => [
+            1 => [1 => 6, 2 => 1, 3 => 7],    // Heat 1: seeds 1, 6, 7
+            2 => [1 => 5, 2 => 2, 3 => null], // Heat 2: seeds 2, 5
+            3 => [1 => 4, 2 => 3, 3 => null], // Heat 3: seeds 3, 4
+        ],
+        'repechage_lane_seeding' => [
+            1 => [1 => '5th in hts', 2 => '4th in hts', 3 => null],
+            2 => [1 => '7th in hts', 2 => '6th in hts', 3 => null],
+        ],
+        'semi_lane_seeding' => [
+            1 => [1 => '1st in reps', 2 => '1st in hts', 3 => '3rd in reps'],
+            2 => [1 => '3rd in hts', 2 => '2nd in hts', 3 => '2nd in reps'],
+        ],
+        'minor_final_lane_seeding' => [
+            1 => '5th in SF', 2 => '4th in SF', 3 => '6th in SF',
+        ],
+        'grand_final_lane_seeding' => [
+            1 => '2nd in SF', 2 => '1st in SF', 3 => '3rd in SF',
+        ],
+        'source_orderings' => ['hts' => 1, 'reps' => 1, 'sf' => 1],
+        'advancement' => [
+            '7 crews split into 3 heats (3 + 2 + 2).',
+            'Winner of each heat → semi-finals.',
+            'Non-winners → 2 repechages; top 3 repechage finishers → semi-finals.',
+            '2 semis of 3 → Grand Final (1st of each semi + fastest 2nd); next three → Minor Final.',
+            'Every crew races at least twice.',
+        ],
+    ],
+
+    'RP.5_3L' => [
+        'lane_count' => 3,
+        'crew_count_range' => [8, 8],
+        'stages' => ['Heat 1', 'Heat 2', 'Heat 3', 'Repechage 1', 'Repechage 2', 'Semi 1', 'Semi 2', 'Minor Final', 'Grand Final'],
+        'heat_lane_seeding' => [
+            1 => [1 => 6, 2 => 1, 3 => 7],    // Heat 1: seeds 1, 6, 7
+            2 => [1 => 5, 2 => 2, 3 => 8],    // Heat 2: seeds 2, 5, 8
+            3 => [1 => 4, 2 => 3, 3 => null], // Heat 3: seeds 3, 4
+        ],
+        'repechage_lane_seeding' => [
+            1 => [1 => '5th in hts', 2 => '4th in hts', 3 => '6th in hts'],
+            2 => [1 => '8th in hts', 2 => '7th in hts', 3 => null],
+        ],
+        'semi_lane_seeding' => [
+            1 => [1 => '1st in reps', 2 => '1st in hts', 3 => '3rd in reps'],
+            2 => [1 => '3rd in hts', 2 => '2nd in hts', 3 => '2nd in reps'],
+        ],
+        'minor_final_lane_seeding' => [
+            1 => '5th in SF', 2 => '4th in SF', 3 => '6th in SF',
+        ],
+        'grand_final_lane_seeding' => [
+            1 => '2nd in SF', 2 => '1st in SF', 3 => '3rd in SF',
+        ],
+        'source_orderings' => ['hts' => 1, 'reps' => 1, 'sf' => 1],
+        'advancement' => [
+            '8 crews split into 3 heats (3 + 3 + 2).',
+            'Winner of each heat → semi-finals.',
+            'Non-winners → 2 repechages; top 3 repechage finishers → semi-finals.',
+            '2 semis of 3 → Grand Final (1st of each semi + fastest 2nd); next three → Minor Final.',
+            'Every crew races at least twice.',
+        ],
+    ],
+
+    'RP.6_3L' => [
+        'lane_count' => 3,
+        'crew_count_range' => [9, 9],
+        'stages' => ['Heat 1', 'Heat 2', 'Heat 3', 'Repechage 1', 'Repechage 2', 'Semi 1', 'Semi 2', 'Minor Final', 'Grand Final'],
+        'heat_lane_seeding' => [
+            1 => [1 => 6, 2 => 1, 3 => 7], // Heat 1: seeds 1, 6, 7
+            2 => [1 => 5, 2 => 2, 3 => 8], // Heat 2: seeds 2, 5, 8
+            3 => [1 => 4, 2 => 3, 3 => 9], // Heat 3: seeds 3, 4, 9
+        ],
+        'repechage_lane_seeding' => [
+            1 => [1 => '5th in hts', 2 => '4th in hts', 3 => '6th in hts'],
+            2 => [1 => '8th in hts', 2 => '7th in hts', 3 => '9th in hts'],
+        ],
+        'semi_lane_seeding' => [
+            1 => [1 => '1st in reps', 2 => '1st in hts', 3 => '3rd in reps'],
+            2 => [1 => '3rd in hts', 2 => '2nd in hts', 3 => '2nd in reps'],
+        ],
+        'minor_final_lane_seeding' => [
+            1 => '5th in SF', 2 => '4th in SF', 3 => '6th in SF',
+        ],
+        'grand_final_lane_seeding' => [
+            1 => '2nd in SF', 2 => '1st in SF', 3 => '3rd in SF',
+        ],
+        'source_orderings' => ['hts' => 1, 'reps' => 1, 'sf' => 1],
+        'advancement' => [
+            '9 crews split into 3 heats (3 + 3 + 3).',
+            'Winner of each heat → semi-finals.',
+            'Non-winners → 2 repechages; top 3 repechage finishers → semi-finals.',
+            '2 semis of 3 → Grand Final (1st of each semi + fastest 2nd); next three → Minor Final.',
+            'Every crew races at least twice.',
+        ],
+    ],
+
     // -------------------------------------------------------------------
     // 4-LANE PLANS
     // -------------------------------------------------------------------
