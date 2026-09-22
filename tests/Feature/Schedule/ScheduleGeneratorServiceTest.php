@@ -606,6 +606,27 @@ class ScheduleGeneratorServiceTest extends TestCase
         );
     }
 
+    public function test_five_crews_on_three_lanes_uses_heats_rep_final(): void
+    {
+        // 5 crews on 3 lanes: no rounds (5 > 3) and previously no IDBF plan
+        // existed for 3 lanes → skipped. RP.2_3L now covers it: Heat 1, Heat 2,
+        // Repechage 1, Grand Final.
+        $event = $this->makeEvent(laneCount: 3);
+        $this->addBlock($event, 'Morning', '09:00:00');
+        $d = $this->makeDiscipline($event, 5, 'Mixed', '200m', 'Small', 'Senior B');
+
+        $result = $this->service->generate($event);
+
+        $races = RaceResult::where('discipline_id', $d->id)->orderBy('id')->get();
+        $this->assertSame(
+            ['Heat 1', 'Heat 2', 'Repechage 1', 'Grand Final'],
+            $races->pluck('stage')->all(),
+        );
+        // Heats seeded up front (3 + 2); rep/final seeded later by LaneSeeder.
+        $this->assertSame(3, $races->firstWhere('stage', 'Heat 1')->crewResults()->count());
+        $this->assertSame(2, $races->firstWhere('stage', 'Heat 2')->crewResults()->count());
+    }
+
     // ----- helpers -----
 
     private function makeEvent(int $laneCount): Event

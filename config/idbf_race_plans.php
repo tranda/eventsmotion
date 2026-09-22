@@ -64,6 +64,33 @@ return [
         ],
     ],
 
+    // 5 crews on 3 lanes: heats 3 + 2 → winner of each heat to the Grand
+    // Final, the other 3 crews to a single Repechage → rep winner to the
+    // Grand Final (3-crew final). Every crew races at least twice.
+    'RP.2_3L' => [
+        'lane_count' => 3,
+        'crew_count_range' => [5, 5],
+        'stages' => ['Heat 1', 'Heat 2', 'Repechage 1', 'Grand Final'],
+        'heat_lane_seeding' => [
+            1 => [1 => 4, 2 => 1, 3 => 5],    // Heat 1: seeds 1, 4, 5
+            2 => [1 => 3, 2 => 2, 3 => null], // Heat 2: seeds 2, 3
+        ],
+        'repechage_lane_seeding' => [
+            1 => [1 => '4th in hts', 2 => '3rd in hts', 3 => '5th in hts'],
+        ],
+        'grand_final_lane_seeding' => [
+            1 => '2nd in hts', 2 => '1st in hts', 3 => '1st in reps',
+        ],
+        'source_orderings' => ['hts' => 1, 'reps' => 1],
+        'advancement' => [
+            '5 crews split into 2 heats (3 + 2).',
+            'Winner of each heat → Grand Final.',
+            'The other 3 crews → Repechage.',
+            'Winner of the Repechage → Grand Final (3 crews total).',
+            'Every crew races at least twice.',
+        ],
+    ],
+
     // -------------------------------------------------------------------
     // 4-LANE PLANS
     // -------------------------------------------------------------------
