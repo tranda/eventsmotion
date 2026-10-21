@@ -210,6 +210,15 @@ Route::middleware(['auth:sanctum', 'minlevel:1'])->group(function () {
     Route::post('snapshots/{id}/restore', [\App\Http\Controllers\API\ScheduleSnapshotController::class, 'restore']);
 });
 
+// Boat marshal check-in (per race, so the stage is recorded)
+Route::middleware(['auth:sanctum', 'minlevel:1'])->group(function () {
+    Route::get('race-results/{race}/crews/{crew}/boat-checkins', [\App\Http\Controllers\API\BoatCheckinController::class, 'show']);
+    Route::post('race-results/{race}/crews/{crew}/boat-checkins', [\App\Http\Controllers\API\BoatCheckinController::class, 'store']);
+    Route::delete('race-results/{race}/crews/{crew}/boat-checkins/{athlete}', [\App\Http\Controllers\API\BoatCheckinController::class, 'destroy'])->whereNumber('athlete');
+});
+// Signed athlete QR (own club, or access_level >= 1)
+Route::middleware('auth:sanctum')->get('athletes/{athlete}/qr-token', [\App\Http\Controllers\API\BoatCheckinController::class, 'qrToken']);
+
 Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
     return $request->user();
 });
