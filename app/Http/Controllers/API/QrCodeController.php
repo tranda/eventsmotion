@@ -6,6 +6,7 @@ use App\Http\Controllers\API\BaseController as BaseController;
 use App\Models\Athlete;
 use Illuminate\Http\Request;
 use SimpleSoftwareIO\QrCode\Facades\QrCode;
+use App\Support\ClubAccess;
 
 class QrCodeController extends BaseController
 {
@@ -17,6 +18,9 @@ class QrCodeController extends BaseController
             $clubId = $user->club_id;
             if ($request->has('athlete_id')) {
                 $athlete = Athlete::findOrFail($request->athlete_id);
+                if (!ClubAccess::ownsAthlete($user, $athlete)) {
+                    return response()->json(['error' => 'Not your club\'s athlete'], 403);
+                }
                 $storagePath = 'photos/qrcodes/';
                 $fileName = 'qrcode_' . $athlete->id . '.svg';
                 QrCode::size(300)->generate('{"id":' . $athlete->id . ', "club_id":' . $athlete->club_id . '}', $storagePath . $fileName);

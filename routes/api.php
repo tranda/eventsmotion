@@ -43,12 +43,15 @@ Route::middleware('auth:sanctum')->post('logout', [AuthController::class, 'logou
 Route::post('forgot-password', [PasswordResetController::class, 'forgotPassword']);
 Route::post('reset-password', [PasswordResetController::class, 'resetPassword']);
 // Route::post('register', [UserController::class, 'register']);
-Route::middleware('auth:sanctum')->get('users', [UserController::class, 'getUsers']);
-Route::middleware('auth:sanctum')->get('users/{userId}', [UserController::class, 'getUser']);
-Route::middleware('auth:sanctum')->post('users', [UserController::class, 'createUser']);
-Route::middleware('auth:sanctum')->put('users/{userId}', [UserController::class, 'updateUser']);
-Route::middleware('auth:sanctum')->delete('users/{userId}', [UserController::class, 'deleteUser']);
-Route::middleware('auth:sanctum')->put('userPassword/{userId}', [UserController::class, 'updatePassword']);
+// User management - Admin only (access levels and passwords of other users).
+Route::middleware(['auth:sanctum', 'admin'])->group(function () {
+    Route::get('users', [UserController::class, 'getUsers']);
+    Route::get('users/{userId}', [UserController::class, 'getUser']);
+    Route::post('users', [UserController::class, 'createUser']);
+    Route::put('users/{userId}', [UserController::class, 'updateUser']);
+    Route::delete('users/{userId}', [UserController::class, 'deleteUser']);
+    Route::put('userPassword/{userId}', [UserController::class, 'updatePassword']);
+});
 
 Route::middleware('auth:sanctum')->get('athletes', [AthleteController::class, 'getAthletesByClubId']);
 // Read a club's athletes (name, birth date, EDBF ID) for external apps such as
@@ -58,8 +61,9 @@ Route::middleware('apikey:athletes.read')->get('athletes/for-club', [AthleteCont
 // such as ClubMotion - requires API key with athletes.write.
 Route::middleware('apikey:athletes.write')->post('athletes/for-club/update', [AthleteController::class, 'updateForClub']);
 Route::middleware('auth:sanctum')->get('athletesTeam', [AthleteController::class, 'getAthletesByTeamId']);
-Route::middleware('auth:sanctum')->get('athletesAll', [AthleteController::class, 'getAllAthletes']);
-Route::middleware('auth:sanctum')->get('athletesAllClubs', [AthleteController::class, 'getAllClubAthletes']);
+// Every athlete on the platform - Event Managers and up only.
+Route::middleware(['auth:sanctum', 'minlevel:2'])->get('athletesAll', [AthleteController::class, 'getAllAthletes']);
+Route::middleware(['auth:sanctum', 'minlevel:2'])->get('athletesAllClubs', [AthleteController::class, 'getAllClubAthletes']);
 Route::middleware('auth:sanctum')->get('eligibleAthletes', [AthleteController::class, 'getAthletesEligibleForCrewId']);
 Route::middleware('auth:sanctum')->get('eligibleCombinedAthletes', [AthleteController::class, 'getAthletesEligibleForCombinedCrewId']);
 Route::middleware('auth:sanctum')->post('athletes', [AthleteController::class, 'createAthlete']);
@@ -67,12 +71,13 @@ Route::middleware('auth:sanctum')->post('athletesImport', [AthleteController::cl
 Route::middleware('auth:sanctum')->put('athletes/{athleteId}', [AthleteController::class, 'updateAthlete']);
 Route::middleware('auth:sanctum')->post('athleteCertificates/{athleteId}', [AthleteController::class, 'updateCertificate']);
 Route::middleware('auth:sanctum')->delete('athletes/{athleteId}', [AthleteController::class, 'deleteAthlete']);
-Route::middleware('auth:sanctum')->put('athletesDetail', [AthleteController::class, 'updateAthleteDetail']);
+Route::middleware(['auth:sanctum', 'admin'])->put('athletesDetail', [AthleteController::class, 'updateAthleteDetail']);
 
 Route::get('clubs', [ClubController::class, 'getAllClubs']);
 Route::get('clubsAdel', [ClubController::class, 'getAllClubsForAdel']);
 Route::middleware('auth:sanctum')->get('clubDetails', [ClubController::class, 'getClubDetails']);
-Route::post('clubAndUser', [ClubController::class, 'createClubAndUser']);
+// Create a club with its first (level 0) user - Event Managers and up only (was public sign-up).
+Route::middleware(['auth:sanctum', 'minlevel:2', 'throttle:20,1'])->post('clubAndUser', [ClubController::class, 'createClubAndUser']);
 // Club CRUD — Event Managers and up (access_level >= 2)
 Route::middleware(['auth:sanctum', 'minlevel:2'])->post('clubs', [ClubController::class, 'createClub']);
 Route::middleware(['auth:sanctum', 'minlevel:2'])->put('clubs/{id}', [ClubController::class, 'updateClub']);
@@ -153,17 +158,18 @@ Route::middleware('apikey:races.bulk-update')->post('race-results/update-single'
 // Registered before race-results/{id} so the static path isn't captured as an {id} param.
 Route::middleware('apikey:races.read')->get('race-results/for-club', [RaceResultController::class, 'forClub']);
 // Enhanced import endpoint with cleanup logic for discipline-specific imports
-Route::middleware('auth:sanctum')->post('race-results/bulk-import-with-cleanup', [RaceResultController::class, 'bulkImportWithCleanup']);
+// Race result writes - Referees and up (access_level >= 1); reading stays open to logged-in users.
+Route::middleware(['auth:sanctum', 'minlevel:1'])->post('race-results/bulk-import-with-cleanup', [RaceResultController::class, 'bulkImportWithCleanup']);
 Route::middleware('auth:sanctum')->get('race-results', [RaceResultController::class, 'index']);
 Route::middleware('auth:sanctum')->get('race-results/{id}', [RaceResultController::class, 'show']);
-Route::middleware('auth:sanctum')->post('race-results', [RaceResultController::class, 'store']);
-Route::middleware('auth:sanctum')->put('race-results/{id}', [RaceResultController::class, 'update']);
-Route::middleware('auth:sanctum')->post('race-results/reorder', [RaceResultController::class, 'reorder']);
-Route::middleware('auth:sanctum')->delete('race-results/{id}', [RaceResultController::class, 'destroy']);
+Route::middleware(['auth:sanctum', 'minlevel:1'])->post('race-results', [RaceResultController::class, 'store']);
+Route::middleware(['auth:sanctum', 'minlevel:1'])->put('race-results/{id}', [RaceResultController::class, 'update']);
+Route::middleware(['auth:sanctum', 'minlevel:1'])->post('race-results/reorder', [RaceResultController::class, 'reorder']);
+Route::middleware(['auth:sanctum', 'minlevel:1'])->delete('race-results/{id}', [RaceResultController::class, 'destroy']);
 Route::middleware('auth:sanctum')->get('race-results/{raceResultId}/crew-results', [RaceResultController::class, 'getCrewResults']);
-Route::middleware('auth:sanctum')->post('race-results/{raceResultId}/crew-results', [RaceResultController::class, 'storeCrewResults']);
-Route::middleware('auth:sanctum')->delete('race-results/{raceResultId}/crew-results', [RaceResultController::class, 'clearCrewResults']);
-Route::middleware('auth:sanctum')->post('race-results/{raceResultId}/recalculate-positions', [RaceResultController::class, 'recalculatePositions']);
+Route::middleware(['auth:sanctum', 'minlevel:1'])->post('race-results/{raceResultId}/crew-results', [RaceResultController::class, 'storeCrewResults']);
+Route::middleware(['auth:sanctum', 'minlevel:1'])->delete('race-results/{raceResultId}/crew-results', [RaceResultController::class, 'clearCrewResults']);
+Route::middleware(['auth:sanctum', 'minlevel:1'])->post('race-results/{raceResultId}/recalculate-positions', [RaceResultController::class, 'recalculatePositions']);
 
 // Schedule Builder — Referees and up (access_level >= 1). The frontend limits
 // referees (level 1) to the Grid tab; Event Managers (>= 2) get all tabs.
@@ -230,7 +236,7 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
 });
 
 Route::middleware('auth:sanctum')->post('qrcode', [QrCodeController::class, 'createQRCode']);
-Route::middleware('auth:sanctum')->post('qrcodeAll', [QrCodeController::class, 'createQRCodeAll']);
+Route::middleware(['auth:sanctum', 'admin'])->post('qrcodeAll', [QrCodeController::class, 'createQRCodeAll']);
 
 // File proxy endpoints for serving images with CORS support
 Route::get('photos/{filename}', [FileController::class, 'getPhoto']);

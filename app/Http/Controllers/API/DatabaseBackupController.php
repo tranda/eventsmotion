@@ -133,7 +133,10 @@ class DatabaseBackupController extends BaseController
             ]);
 
             $filename = $request->filename;
-            $path = storage_path('app/backups/' . $filename);
+            $path = self::backupPath($filename);
+            if (!$path) {
+                return $this->sendError('Invalid backup file name', [], 422);
+            }
 
             if (!file_exists($path)) {
                 return $this->sendError('Backup file not found', [], 404);
@@ -161,6 +164,9 @@ class DatabaseBackupController extends BaseController
             ]);
 
             $filename = $request->filename;
+            if (!self::backupPath($filename)) {
+                return $this->sendError('Invalid backup file name', [], 422);
+            }
             $filepath = 'backups/' . $filename;
 
             if (!Storage::disk('local')->exists($filepath)) {
@@ -188,7 +194,10 @@ class DatabaseBackupController extends BaseController
                 return $this->sendError('Filename is required', [], 422);
             }
 
-            $path = storage_path('app/backups/' . $filename);
+            $path = self::backupPath($filename);
+            if (!$path) {
+                return $this->sendError('Invalid backup file name', [], 422);
+            }
 
             if (!file_exists($path)) {
                 return $this->sendError('Backup file not found', [], 404);
@@ -199,5 +208,18 @@ class DatabaseBackupController extends BaseController
         } catch (\Exception $e) {
             return $this->sendError('Error downloading backup', [$e->getMessage()], 500);
         }
+    }
+
+    /**
+     * Full path of a backup file, or null if the name is not one of our
+     * backup files. Stops "../.env"-style names from reaching other files.
+     */
+    private static function backupPath($filename): ?string
+    {
+        $name = basename((string) $filename);
+        if ($name !== $filename || !preg_match('/^backup_[0-9_-]+\.sql$/', $name)) {
+            return null;
+        }
+        return storage_path('app/backups/' . $name);
     }
 }

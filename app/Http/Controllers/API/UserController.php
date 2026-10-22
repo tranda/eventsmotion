@@ -94,8 +94,10 @@ class UserController extends BaseController
 
 		$user = User::findOrFail($id);
 		$user->password = bcrypt($request->password);
-		
 		$user->save();
+
+		// Sign the user out everywhere: old login tokens stop working.
+		$user->tokens()->delete();
 
 		return parent::sendResponse($user, 'Successfull update');
 	}

@@ -14,6 +14,7 @@ use App\Models\Event;
 use App\Models\Club;
 use App\Models\Team;
 use App\Models\TeamClubs;
+use App\Support\ClubAccess;
 
 use Carbon\Carbon;
 
@@ -127,6 +128,12 @@ class AthleteController extends BaseController
         return $club;
     }
 
+    /** Club users may only change their own club's athletes; staff any. */
+    private function canManageAthlete($user, $athlete): bool
+    {
+        return ClubAccess::ownsAthlete($user, $athlete);
+    }
+
     public function getAthletesByClubId(Request $request)
     {
         $user = $request->user();
@@ -191,6 +198,7 @@ class AthleteController extends BaseController
         $user = $request->user();
         if ($user) {
             $team_id = $request->team_id;
+            ClubAccess::assertTeam($user, $team_id);
             $teamClubs = TeamClubs::where('team_id', $team_id)->get();
             $athletes_ext = [];
             foreach ($teamClubs as $team) {
@@ -295,7 +303,7 @@ class AthleteController extends BaseController
         if ($user) {
             $club_id = $user->club_id;
             $crewId = $request->input('crew_id');
-            $crew = Crew::findOrFail($crewId);
+            $crew = ClubAccess::assertCrew($user, $crewId);
             // $athletes = Athlete::where('club_id', $club_id)->get();
             $team_id = $request->team_id;
             $teamClubs = TeamClubs::where('team_id', $crew->team_id)->get();
@@ -481,8 +489,12 @@ class AthleteController extends BaseController
         $user = $request->user(); // Retrieve the authenticated user
 
         if ($user) {
-            $clubId = $user->club_id;
             $athlete = Athlete::findOrFail($athleteId);
+            if (!$this->canManageAthlete($user, $athlete)) {
+                return response()->json(['error' => 'Not your club\'s athlete'], 403);
+            }
+            // The athlete's own club (staff may edit other clubs' athletes).
+            $clubId = $athlete->club_id ?: $user->club_id;
             $athlete->first_name = $request->input('first_name');
             $athlete->last_name = $request->input('last_name');
             $athlete->birth_date = $request->input('birth_date');
@@ -521,8 +533,10 @@ class AthleteController extends BaseController
         $user = $request->user(); // Retrieve the authenticated user
 
         if ($user) {
-            $clubId = $user->club_id;
             $athlete = Athlete::findOrFail($athleteId);
+            if (!$this->canManageAthlete($user, $athlete)) {
+                return response()->json(['error' => 'Not your club\'s athlete'], 403);
+            }
             if ($athlete) {
                 // $athlete->delete();
                 $athlete->club_id = 0;
@@ -605,13 +619,28 @@ class AthleteController extends BaseController
         $user = $request->user(); // Retrieve the authenticated user
 
         if ($user) {
-            $clubId = $user->club_id;
             $athlete = Athlete::findOrFail($athleteId);
+            if (!$this->canManageAthlete($user, $athlete)) {
+                return response()->json(['error' => 'Not your club\'s athlete'], 403);
+            }
             if ($request->hasFile('file')) {
+                // Only PDF or image certificates; the extension is ours, never the uploader's.
+                $check = \Illuminate\Support\Facades\Validator::make($request->all(), ['file' => 'file|mimes:pdf,jpg,jpeg,png|max:10240']);
+                if ($check->fails()) {
+                    return response()->json(['error' => 'Certificate must be a PDF, JPG or PNG up to 10 MB'], 422);
+                }
                 $file = $request->file('file');
-                $extension = $file->extension();
+                $extension = ['jpeg' => 'jpg'][$file->guessExtension()] ?? $file->guessExtension();
+                if (!in_array($extension, ['pdf', 'jpg', 'png'], true)) {
+                    return response()->json(['error' => 'Certificate must be a PDF, JPG or PNG'], 422);
+                }
                 $fileName = "certificate_" . $athlete->id . "." . $extension;
                 $storagePath = 'certificates/';
+                // Remove a previous certificate saved with another extension.
+                if ($athlete->certificate && $athlete->certificate !== $fileName
+                    && preg_match('/^certificate_\d+\.[a-z0-9]+$/', $athlete->certificate)) {
+                    @unlink(public_path($storagePath . $athlete->certificate));
+                }
                 $file->move(public_path($storagePath), $fileName);
                 $athlete->certificate = $fileName;
 
@@ -638,7 +667,10 @@ class AthleteController extends BaseController
             $dataArray = $jsonData;
 
             foreach ($dataArray as $item) {
-                $athlete = Athlete::where('edbf_id', $item['edbf_id'])->first();
+                // Only ever update this club's own athletes, matched by a real EDBF ID.
+                $edbfId = trim((string) ($item['edbf_id'] ?? ''));
+                $athlete = $edbfId === '' ? null
+                    : Athlete::where('club_id', $clubId)->where('edbf_id', $edbfId)->first();
                 if ($athlete) {
                     // $athlete->certificate = $item['certificate'];
                     $athlete->document_no = $item['document_no'];

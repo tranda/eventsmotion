@@ -42,7 +42,8 @@ class ClubController extends BaseController
     {
         $user = $request->user();
         if ($user) {
-            $club_id = $request->club_id;
+            // Club users only see their own club's details.
+            $club_id = \App\Support\ClubAccess::isStaff($user) ? $request->club_id : $user->club_id;
             $club = Club::where('id', $club_id)->get()->first();
             $clubDetail = [];
             if ($club) {
@@ -162,6 +163,15 @@ class ClubController extends BaseController
 
     public function createClubAndUser(Request $request)
     {
+        $request->validate([
+            'clubname' => 'required|string|max:255',
+            'country' => 'nullable|string|max:255',
+            'name' => 'required|string|max:255',
+            'username' => 'required|string|max:255|unique:users,username',
+            'email' => 'required|email|max:255|unique:users,email',
+            'password' => 'required|string|min:8',
+        ]);
+
         $club = new Club();
         $club->name = $request->clubname;
         $club->country = $request->country;

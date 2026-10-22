@@ -8,6 +8,7 @@ use Illuminate\Http\Request;
 use App\Models\Athlete;
 use App\Models\CrewAthlete;
 use App\Support\EventEditGuard;
+use App\Support\ClubAccess;
 
 class CrewAthleteController extends BaseController
 {
@@ -15,7 +16,7 @@ class CrewAthleteController extends BaseController
     {
         $user = $request->user();
         if ($user) {
-            $club_id = $user->club_id;
+            ClubAccess::assertCrew($user, $request->crew_id);
 
             $crewathletes = CrewAthlete::where('crew_id', $request->crew_id)->get();
             $crew = [];
@@ -39,7 +40,8 @@ class CrewAthleteController extends BaseController
         $user = $request->user();
 
         if ($user) {
-            $clubId = $user->club_id;
+            $crew = ClubAccess::assertCrew($user, $request->crew_id);
+            ClubAccess::assertAthleteFitsCrew($user, $request->athlete_id, $crew);
 
             EventEditGuard::forCrew($request->crew_id, $user);
 
@@ -61,8 +63,9 @@ class CrewAthleteController extends BaseController
         $user = $request->user();
 
         if ($user) {
-            $clubId = $user->club_id;
             $crew = CrewAthlete::findOrFail($crewathleteId);
+            $parent = ClubAccess::assertCrew($user, $crew->crew_id);
+            ClubAccess::assertAthleteFitsCrew($user, $request->athlete_id, $parent);
             EventEditGuard::forCrew($crew->crew_id, $user);
             $crew->athlete_id = $request->athlete_id;
             // $crew->crew_id = $crewId;
@@ -80,8 +83,8 @@ class CrewAthleteController extends BaseController
         $user = $request->user();
 
         if ($user) {
-            $clubId = $user->club_id;
             $athlete = CrewAthlete::findOrFail($crewathleteId);
+            ClubAccess::assertCrew($user, $athlete->crew_id);
             EventEditGuard::forCrew($athlete->crew_id, $user);
             if ($athlete) {
                 $athlete->delete();

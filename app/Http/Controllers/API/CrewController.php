@@ -10,6 +10,7 @@ use App\Models\CrewAthlete;
 use App\Models\Team;
 use App\Support\EventEditGuard;
 use App\Support\TeamRegistrationGuard;
+use App\Support\ClubAccess;
 
 class CrewController extends BaseController
 {
@@ -23,6 +24,7 @@ class CrewController extends BaseController
     {
         $team_id = $request->input('team_id');
         $disciplines = $request->input('discipline_ids');
+        ClubAccess::assertTeam($request->user(), $team_id);
 
         // Inactive teams (or teams of an inactive club) cannot register.
         TeamRegistrationGuard::assertCanRegister($team_id, $request->user());
@@ -57,6 +59,7 @@ class CrewController extends BaseController
     {
         $team_id = $request->input('team_id');
         $discipline_id = $request->input('discipline_id');
+        ClubAccess::assertTeam($request->user(), $team_id);
 
         // Inactive teams (or teams of an inactive club) cannot register.
         TeamRegistrationGuard::assertCanRegister($team_id, $request->user());
@@ -81,9 +84,13 @@ class CrewController extends BaseController
         $team_id = $request->input('team_id');
         $discipline_id = $request->input('discipline_id');
 
+        ClubAccess::assertTeam($request->user(), $team_id);
         EventEditGuard::forDiscipline($discipline_id, $request->user());
 
         $crew = Crew::where('team_id', $team_id)->where('discipline_id', $discipline_id)->first();
+        if (!$crew) {
+            return response()->json(['error' => 'Crew not found'], 404);
+        }
         $crewAthletes = CrewAthlete::where('crew_id', $crew->id)->get();
         foreach($crewAthletes as $crewAthlete) {
             $crewAthlete->delete();
