@@ -54,6 +54,9 @@ Route::middleware('auth:sanctum')->get('athletes', [AthleteController::class, 'g
 // Read a club's athletes (name, birth date, EDBF ID) for external apps such as
 // ClubMotion - requires API key with athletes.read. No photos or documents.
 Route::middleware('apikey:athletes.read')->get('athletes/for-club', [AthleteController::class, 'forClub']);
+// Update a club's athletes (EDBF ID, birth date, gender only) from external apps
+// such as ClubMotion - requires API key with athletes.write.
+Route::middleware('apikey:athletes.write')->post('athletes/for-club/update', [AthleteController::class, 'updateForClub']);
 Route::middleware('auth:sanctum')->get('athletesTeam', [AthleteController::class, 'getAthletesByTeamId']);
 Route::middleware('auth:sanctum')->get('athletesAll', [AthleteController::class, 'getAllAthletes']);
 Route::middleware('auth:sanctum')->get('athletesAllClubs', [AthleteController::class, 'getAllClubAthletes']);

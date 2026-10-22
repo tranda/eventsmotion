@@ -52,6 +52,62 @@ class AthleteController extends BaseController
         ]);
     }
 
+    /**
+     * API-key endpoint (permission `athletes.write`) for external apps, e.g.
+     * ClubMotion pushing its member data. Pick the club by `club_id` or exact
+     * `club` name. Only EDBF ID, birth date and gender can change, and only for
+     * athletes of that club. The age category follows a new birth date.
+     */
+    public function updateForClub(Request $request)
+    {
+        $request->validate([
+            'club_id' => 'required_without:club|integer',
+            'club' => 'required_without:club_id|string|max:255',
+            'updates' => 'required|array|max:500',
+            'updates.*.id' => 'required|integer',
+            'updates.*.edbf_id' => 'sometimes|nullable|string|max:50',
+            'updates.*.birth_date' => 'sometimes|date_format:Y-m-d',
+            'updates.*.gender' => 'sometimes|in:Male,Female',
+        ]);
+
+        $club = $request->filled('club_id')
+            ? Club::find($request->club_id)
+            : Club::whereRaw('LOWER(name) = ?', [mb_strtolower(trim($request->club))])->first();
+
+        if (!$club) {
+            return response()->json(['success' => false, 'message' => 'Club not found'], 404);
+        }
+
+        $updated = 0;
+        $skipped = [];
+
+        foreach ($request->input('updates') as $update) {
+            $athlete = Athlete::where('club_id', $club->id)->find($update['id']);
+            if (!$athlete) {
+                $skipped[] = $update['id'];
+                continue;
+            }
+
+            if (array_key_exists('edbf_id', $update)) {
+                $athlete->edbf_id = $update['edbf_id'] !== null ? trim($update['edbf_id']) : null;
+            }
+            if (array_key_exists('birth_date', $update)) {
+                $athlete->birth_date = $update['birth_date'];
+                $athlete->category = $this->getAthleteCategory($update['birth_date']);
+            }
+            if (array_key_exists('gender', $update)) {
+                $athlete->gender = $update['gender'];
+            }
+
+            if ($athlete->isDirty()) {
+                $athlete->save();
+                $updated++;
+            }
+        }
+
+        return response()->json(['success' => true, 'updated' => $updated, 'skipped' => $skipped]);
+    }
+
     public function getAthletesByClubId(Request $request)
     {
         $user = $request->user();
