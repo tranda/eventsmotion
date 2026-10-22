@@ -41,7 +41,7 @@ class ApiKeyController extends BaseController
             $request->validate([
                 'name' => 'required|string|max:255',
                 'permissions' => 'required|array',
-                'permissions.*' => 'string|in:races.bulk-update,races.read,races.write,*',
+                'permissions.*' => 'string|in:races.bulk-update,races.read,races.write,athletes.read,*',
                 'expires_in_days' => 'nullable|integer|min:1|max:365'
             ]);
 
@@ -113,7 +113,7 @@ class ApiKeyController extends BaseController
             $request->validate([
                 'name' => 'sometimes|string|max:255',
                 'permissions' => 'sometimes|array',
-                'permissions.*' => 'string|in:races.bulk-update,races.read,races.write,*',
+                'permissions.*' => 'string|in:races.bulk-update,races.read,races.write,athletes.read,*',
                 'expires_in_days' => 'nullable|integer|min:1|max:365',
                 'is_active' => 'sometimes|boolean'
             ]);

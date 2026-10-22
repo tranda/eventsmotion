@@ -51,6 +51,9 @@ Route::middleware('auth:sanctum')->delete('users/{userId}', [UserController::cla
 Route::middleware('auth:sanctum')->put('userPassword/{userId}', [UserController::class, 'updatePassword']);
 
 Route::middleware('auth:sanctum')->get('athletes', [AthleteController::class, 'getAthletesByClubId']);
+// Read a club's athletes (name, birth date, EDBF ID) for external apps such as
+// ClubMotion - requires API key with athletes.read. No photos or documents.
+Route::middleware('apikey:athletes.read')->get('athletes/for-club', [AthleteController::class, 'forClub']);
 Route::middleware('auth:sanctum')->get('athletesTeam', [AthleteController::class, 'getAthletesByTeamId']);
 Route::middleware('auth:sanctum')->get('athletesAll', [AthleteController::class, 'getAllAthletes']);
 Route::middleware('auth:sanctum')->get('athletesAllClubs', [AthleteController::class, 'getAllClubAthletes']);

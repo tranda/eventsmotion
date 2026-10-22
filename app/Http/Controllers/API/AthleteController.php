@@ -19,6 +19,39 @@ use Carbon\Carbon;
 
 class AthleteController extends BaseController
 {
+    /**
+     * API-key endpoint (permission `athletes.read`) for external apps, e.g.
+     * ClubMotion pulling EDBF IDs. Pick the club by `club_id` or by exact
+     * `club` name (case-insensitive). Returns only identity fields: no photos,
+     * documents or certificates.
+     */
+    public function forClub(Request $request)
+    {
+        $request->validate([
+            'club_id' => 'required_without:club|integer',
+            'club' => 'required_without:club_id|string|max:255',
+        ]);
+
+        $club = $request->filled('club_id')
+            ? Club::find($request->club_id)
+            : Club::whereRaw('LOWER(name) = ?', [mb_strtolower(trim($request->club))])->first();
+
+        if (!$club) {
+            return response()->json(['success' => false, 'message' => 'Club not found'], 404);
+        }
+
+        $athletes = Athlete::where('club_id', $club->id)
+            ->orderBy('last_name')
+            ->orderBy('first_name')
+            ->get(['id', 'first_name', 'last_name', 'birth_date', 'gender', 'edbf_id']);
+
+        return response()->json([
+            'success' => true,
+            'club' => ['id' => $club->id, 'name' => $club->name],
+            'data' => $athletes,
+        ]);
+    }
+
     public function getAthletesByClubId(Request $request)
     {
         $user = $request->user();
