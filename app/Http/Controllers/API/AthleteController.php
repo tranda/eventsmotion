@@ -21,23 +21,15 @@ class AthleteController extends BaseController
 {
     /**
      * API-key endpoint (permission `athletes.read`) for external apps, e.g.
-     * ClubMotion pulling EDBF IDs. Pick the club by `club_id` or by exact
-     * `club` name (case-insensitive). Returns only identity fields: no photos,
-     * documents or certificates.
+     * ClubMotion pulling EDBF IDs. Only for the club the API key is linked to
+     * (see apiKeyClub). Returns only identity fields: no photos, documents or
+     * certificates.
      */
     public function forClub(Request $request)
     {
-        $request->validate([
-            'club_id' => 'required_without:club|integer',
-            'club' => 'required_without:club_id|string|max:255',
-        ]);
-
-        $club = $request->filled('club_id')
-            ? Club::find($request->club_id)
-            : Club::whereRaw('LOWER(name) = ?', [mb_strtolower(trim($request->club))])->first();
-
-        if (!$club) {
-            return response()->json(['success' => false, 'message' => 'Club not found'], 404);
+        $club = $this->apiKeyClub($request);
+        if ($club instanceof \Illuminate\Http\JsonResponse) {
+            return $club;
         }
 
         $athletes = Athlete::where('club_id', $club->id)
@@ -54,15 +46,13 @@ class AthleteController extends BaseController
 
     /**
      * API-key endpoint (permission `athletes.write`) for external apps, e.g.
-     * ClubMotion pushing its member data. Pick the club by `club_id` or exact
-     * `club` name. Only EDBF ID, birth date and gender can change, and only for
+     * ClubMotion pushing its member data. Only for the club the API key is
+     * linked to. Only EDBF ID, birth date and gender can change, and only for
      * athletes of that club. The age category follows a new birth date.
      */
     public function updateForClub(Request $request)
     {
         $request->validate([
-            'club_id' => 'required_without:club|integer',
-            'club' => 'required_without:club_id|string|max:255',
             'updates' => 'required|array|max:500',
             'updates.*.id' => 'required|integer',
             'updates.*.edbf_id' => 'sometimes|nullable|string|max:50',
@@ -70,12 +60,9 @@ class AthleteController extends BaseController
             'updates.*.gender' => 'sometimes|in:Male,Female',
         ]);
 
-        $club = $request->filled('club_id')
-            ? Club::find($request->club_id)
-            : Club::whereRaw('LOWER(name) = ?', [mb_strtolower(trim($request->club))])->first();
-
-        if (!$club) {
-            return response()->json(['success' => false, 'message' => 'Club not found'], 404);
+        $club = $this->apiKeyClub($request);
+        if ($club instanceof \Illuminate\Http\JsonResponse) {
+            return $club;
         }
 
         $updated = 0;
@@ -106,6 +93,38 @@ class AthleteController extends BaseController
         }
 
         return response()->json(['success' => true, 'updated' => $updated, 'skipped' => $skipped]);
+    }
+
+    /**
+     * The club an athletes.* API key may act on: the club the key is linked
+     * to. A key without a club is refused, and so is a request naming a
+     * different club (`club_id` or `club` name are optional checks).
+     *
+     * @return Club|\Illuminate\Http\JsonResponse
+     */
+    private function apiKeyClub(Request $request)
+    {
+        $key = $request->attributes->get('api_key');
+        $club = $key && $key->club_id ? Club::find($key->club_id) : null;
+
+        if (!$club) {
+            return response()->json([
+                'success' => false,
+                'message' => 'This API key is not linked to a club. Link it in Administration → API Keys.',
+            ], 403);
+        }
+
+        $askedId = $request->input('club_id');
+        $askedName = $request->input('club');
+        if (($askedId !== null && (int) $askedId !== (int) $club->id)
+            || ($askedName !== null && mb_strtolower(trim($askedName)) !== mb_strtolower(trim($club->name)))) {
+            return response()->json([
+                'success' => false,
+                'message' => "This API key only works for club \"{$club->name}\".",
+            ], 403);
+        }
+
+        return $club;
     }
 
     public function getAthletesByClubId(Request $request)

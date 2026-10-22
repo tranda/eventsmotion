@@ -16,8 +16,8 @@ class ApiKeyController extends BaseController
     public function index()
     {
         try {
-            $apiKeys = ApiKey::with('creator:id,name,username')
-                ->select(['id', 'name', 'key_prefix', 'permissions', 'created_by', 'last_used_at', 'expires_at', 'is_active', 'created_at'])
+            $apiKeys = ApiKey::with(self::relations())
+                ->select(self::columns())
                 ->orderBy('created_at', 'desc')
                 ->get();
 
@@ -42,6 +42,7 @@ class ApiKeyController extends BaseController
                 'name' => 'required|string|max:255',
                 'permissions' => 'required|array',
                 'permissions.*' => 'string|in:races.bulk-update,races.read,races.write,athletes.read,athletes.write,*',
+                'club_id' => 'nullable|integer|exists:clubs,id',
                 'expires_in_days' => 'nullable|integer|min:1|max:365'
             ]);
 
@@ -57,11 +58,15 @@ class ApiKeyController extends BaseController
                 $expiresAt
             );
 
+            if ($request->filled('club_id') && ApiKey::hasClubColumn()) {
+                $result['model']->update(['club_id' => (int) $request->club_id]);
+            }
+
             return response()->json([
                 'success' => true,
                 'data' => [
                     'api_key' => $result['api_key'], // Only show the full key once!
-                    'model' => $result['model']->load('creator:id,name,username')
+                    'model' => $result['model']->load(self::relations())
                 ],
                 'message' => 'API key created successfully. Store this key securely - it will not be shown again!'
             ], 201);
@@ -79,8 +84,8 @@ class ApiKeyController extends BaseController
     public function show($id)
     {
         try {
-            $apiKey = ApiKey::with('creator:id,name,username')
-                ->select(['id', 'name', 'key_prefix', 'permissions', 'created_by', 'last_used_at', 'expires_at', 'is_active', 'created_at'])
+            $apiKey = ApiKey::with(self::relations())
+                ->select(self::columns())
                 ->find($id);
 
             if (!$apiKey) {
@@ -114,11 +119,15 @@ class ApiKeyController extends BaseController
                 'name' => 'sometimes|string|max:255',
                 'permissions' => 'sometimes|array',
                 'permissions.*' => 'string|in:races.bulk-update,races.read,races.write,athletes.read,athletes.write,*',
+                'club_id' => 'sometimes|nullable|integer|exists:clubs,id',
                 'expires_in_days' => 'nullable|integer|min:1|max:365',
                 'is_active' => 'sometimes|boolean'
             ]);
 
             $updateData = $request->only(['name', 'permissions', 'is_active']);
+            if ($request->has('club_id') && ApiKey::hasClubColumn()) {
+                $updateData['club_id'] = $request->club_id;
+            }
 
             if ($request->has('expires_in_days')) {
                 if ($request->expires_in_days) {
@@ -129,7 +138,7 @@ class ApiKeyController extends BaseController
             }
 
             $apiKey->update($updateData);
-            $apiKey->load('creator:id,name,username');
+            $apiKey->load(self::relations());
 
             return response()->json([
                 'success' => true,
@@ -166,5 +175,16 @@ class ApiKeyController extends BaseController
         } catch (\Exception $e) {
             return $this->sendError('Error revoking API key', [$e->getMessage()], 500);
         }
+    }
+
+    private static function columns(): array
+    {
+        $cols = ['id', 'name', 'key_prefix', 'permissions', 'created_by', 'last_used_at', 'expires_at', 'is_active', 'created_at'];
+        return ApiKey::hasClubColumn() ? array_merge($cols, ['club_id']) : $cols;
+    }
+
+    private static function relations(): array
+    {
+        return ApiKey::hasClubColumn() ? ['creator:id,name,username', 'club:id,name'] : ['creator:id,name,username'];
     }
 }

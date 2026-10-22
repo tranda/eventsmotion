@@ -19,7 +19,8 @@ class ApiKeyAuth
     public function handle(Request $request, Closure $next, ?string $permission = null)
     {
         \Log::info('🔑 ApiKeyAuth middleware called', [
-            'url' => $request->fullUrl(),
+            // Path only: a key passed as ?api_key=… must never reach the log.
+            'url' => $request->url(),
             'method' => $request->method(),
             'has_header' => $request->hasHeader('X-API-Key'),
             'has_param' => $request->has('api_key'),

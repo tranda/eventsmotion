@@ -17,6 +17,7 @@ class ApiKey extends Model
         'key_hash',
         'key_prefix',
         'permissions',
+        'club_id',
         'created_by',
         'expires_at',
         'is_active'
@@ -28,6 +29,21 @@ class ApiKey extends Model
         'last_used_at' => 'datetime',
         'is_active' => 'boolean'
     ];
+
+    /**
+     * Whether the club_id column exists yet (the migration is run by hand
+     * after deploy). Lets the API keys screen keep working before that.
+     */
+    public static function hasClubColumn(): bool
+    {
+        static $has = null;
+        return $has ??= \Illuminate\Support\Facades\Schema::hasColumn('api_keys', 'club_id');
+    }
+
+    public function club()
+    {
+        return $this->belongsTo(Club::class);
+    }
 
     protected $hidden = [
         'key_hash'
