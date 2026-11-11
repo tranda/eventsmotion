@@ -104,6 +104,7 @@ class BadgeService
             'category' => $type === 'athlete' ? (string) ($a->category ?? '') : '',
             'edbf_id' => (string) ($a->edbf_id ?? ''),
             'photo_path' => $photo && is_file($photo) ? $photo : null,
+            'photo_file' => $photo && is_file($photo) ? basename($photo) : null,
             'qr' => $type === 'athlete' ? fn () => AthleteQrCode::generate($a) : null,
         ];
     }
@@ -127,6 +128,7 @@ class BadgeService
             'category' => '',
             'edbf_id' => '',
             'photo_path' => $photo && is_file($photo) ? $photo : null,
+            'photo_file' => $photo && is_file($photo) ? basename($photo) : null,
             'qr' => null,
         ];
     }
@@ -148,6 +150,8 @@ class BadgeService
             'category' => $e['category'],
             'edbf_id' => $e['edbf_id'],
             'has_photo' => $e['photo_path'] !== null,
+            // athletes: public /photos/{file}; people: badges/files/{file} (auth)
+            'photo_file' => $e['photo_file'] ?? null,
         ];
     }
 }
