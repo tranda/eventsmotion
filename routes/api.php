@@ -110,6 +110,9 @@ Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::post('backups/restore', [DatabaseBackupController::class, 'restore']);
     Route::delete('backups', [DatabaseBackupController::class, 'destroy']);
     Route::get('backups/download', [DatabaseBackupController::class, 'download']);
+    // Pending migrations + run them (php artisan migrate --force)
+    Route::get('database-updates', [\App\Http\Controllers\API\DatabaseUpdatesController::class, 'index']);
+    Route::post('database-updates/run', [\App\Http\Controllers\API\DatabaseUpdatesController::class, 'run'])->middleware('throttle:5,1');
 });
 
 // Discipline Routes - Public access for listing, admin access for CRUD
