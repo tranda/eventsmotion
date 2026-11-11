@@ -228,6 +228,17 @@ Route::middleware(['auth:sanctum', 'minlevel:1'])->group(function () {
     Route::post('race-results/{race}/crews/{crew}/boat-checkins', [\App\Http\Controllers\API\BoatCheckinController::class, 'store']);
     Route::delete('race-results/{race}/crews/{crew}/boat-checkins/{athlete}', [\App\Http\Controllers\API\BoatCheckinController::class, 'destroy'])->whereNumber('athlete');
 });
+// Event accreditation badges — Event Managers and up (access_level >= 2)
+Route::middleware(['auth:sanctum', 'minlevel:2'])->prefix('events/{eventId}/badges')->whereNumber('eventId')->group(function () {
+    Route::get('/', [\App\Http\Controllers\API\BadgeController::class, 'index']);
+    Route::post('template', [\App\Http\Controllers\API\BadgeController::class, 'saveTemplate']);
+    Route::post('people', [\App\Http\Controllers\API\BadgeController::class, 'storePerson']);
+    Route::post('people/{personId}', [\App\Http\Controllers\API\BadgeController::class, 'updatePerson'])->whereNumber('personId');
+    Route::delete('people/{personId}', [\App\Http\Controllers\API\BadgeController::class, 'deletePerson'])->whereNumber('personId');
+    Route::get('files/{name}', [\App\Http\Controllers\API\BadgeController::class, 'file']);
+    Route::get('download', [\App\Http\Controllers\API\BadgeController::class, 'download']);
+});
+
 // Signed athlete QR (own club, or access_level >= 1)
 Route::middleware('auth:sanctum')->get('athletes/{athlete}/qr-token', [\App\Http\Controllers\API\BoatCheckinController::class, 'qrToken']);
 
