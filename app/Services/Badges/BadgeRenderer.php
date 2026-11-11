@@ -123,17 +123,22 @@ class BadgeRenderer
         if ($this->fields['photo']) {
             $html .= $this->photo($e, 2, 26.5, 28.5, 38);
         }
+        // Right column (x 32 → card edge): QR, ribbon, areas, category and ID
+        // all centred on the ribbon's centre line.
+        $colX = 32;
+        $colW = self::GRID_W - $colX;
         if ($e['type'] === 'athlete' && $this->fields['qr']) {
-            $html .= $this->qr($e, 38.5, 26.5, 13.5);
+            $qs = 13.5;
+            $html .= $this->qr($e, $colX + ($colW - $qs * $this->fs / $this->sx) / 2, 26.5, $qs);
         }
-        $html .= $this->typeTag($e, 32, 41.5, 5, 9);
-        $html .= $this->areaRow($e, 32, 47.5, 20);
+        $html .= $this->typeTag($e, $colX, 41.5, 5, 9);
+        $html .= $this->areaRow($e, $colX, 47.5, $colW);
 
         if ($this->fields['category'] && $e['category'] !== '') {
-            $html .= $this->text(31, 56.5, 20, 4.5, mb_strtoupper($e['category']), 8.5, self::CATEGORY_COLOR, true, 'right');
+            $html .= $this->text($colX, 56.5, $colW, 4.5, mb_strtoupper($e['category']), 8.5, self::CATEGORY_COLOR, true, 'center');
         }
         if ($this->fields['edbf_id'] && $e['edbf_id'] !== '') {
-            $html .= $this->text(31, 61, 20, 4, $e['edbf_id'], 8, '#000000', true, 'right');
+            $html .= $this->text($colX, 61, $colW, 4, $e['edbf_id'], 8, '#000000', true, 'center');
         }
         $html .= $this->text(2.5, 67.5, 49, 3.8, mb_strtoupper($e['first_name']), 7, '#000000', false);
         $html .= $this->text(2.5, 71.2, 49, 5, mb_strtoupper($e['last_name']), 10, '#000000', true);
@@ -237,9 +242,9 @@ class BadgeRenderer
         $labelH = 2.6 * $this->sy;
         $numH = 5.4 * $this->sy;
         return $this->abs($x * $this->sx, $y * $this->sy, $rw, $labelH,
-                $this->cell('ACCESSIBLE AREAS', 4.6 * $this->fs, $labelH, self::AREA_ON, false, 'right', 0))
+                $this->cell('ACCESSIBLE AREAS', 4.6 * $this->fs, $labelH, self::AREA_ON, false, 'center', 0))
             . $this->abs($x * $this->sx, $y * $this->sy + $labelH, $rw, $numH,
-                $this->cell('', 11 * $this->fs, $numH, self::AREA_ON, true, 'right', 0, implode('&nbsp;', $nums)));
+                $this->cell('', 11 * $this->fs, $numH, self::AREA_ON, true, 'center', 0, implode('&nbsp;', $nums)));
     }
 
     /** Gender letter for athletes, the type label (S, VIP, MEDIA...) for everyone else. */
