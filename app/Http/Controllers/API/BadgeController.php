@@ -58,6 +58,7 @@ class BadgeController extends BaseController
 
         $data = Validator::make($request->all(), [
             'size' => ['required', Rule::in(BadgeTemplate::SIZES)],
+            'layout' => ['nullable', Rule::in(BadgeTemplate::LAYOUTS)],
             'banner_text' => 'nullable|string|max:60',
             'banner_color' => ['required', 'regex:/^#[0-9A-Fa-f]{6}$/'],
             'footer_color' => ['required', 'regex:/^#[0-9A-Fa-f]{6}$/'],
@@ -86,6 +87,11 @@ class BadgeController extends BaseController
             'types' => $this->cleanTypes($data['types'] ?? null),
             'areas' => $this->cleanAreas($data['areas'] ?? null),
         ]);
+
+        // Guarded so saving keeps working until the layout migration has run.
+        if (\Illuminate\Support\Facades\Schema::hasColumn('badge_templates', 'layout')) {
+            $tpl->layout = $data['layout'] ?? ($tpl->layout ?: 'classic');
+        }
 
         foreach (['logo', 'background', 'back_background'] as $slot) {
             if ($request->hasFile($slot)) {

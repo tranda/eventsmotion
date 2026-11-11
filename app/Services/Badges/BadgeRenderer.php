@@ -130,6 +130,9 @@ class BadgeRenderer
 
     private function front(array $e): string
     {
+        if (($this->template->layout ?? 'classic') === 'eurocup') {
+            return $this->frontEuroCup($e);
+        }
         $html = $this->fullImage($this->template->background);
         $html .= $this->logo(30, 1.5, 21.5, 8.5);
         if ($this->fields['banner']) {
@@ -158,6 +161,60 @@ class BadgeRenderer
         $html .= $this->text(2.5, 67.5, 49, 3.8, mb_strtoupper($e['first_name']), 7, '#000000', false);
         $html .= $this->text(2.5, 71.2, 49, 5, mb_strtoupper($e['last_name']), 10, '#000000', true);
         $html .= $this->footer($e, 78.6, 7, 9);
+
+        return $html;
+    }
+
+    /**
+     * Euro Cup 2023 style front. The artwork carries the header (dates,
+     * event title) and the bottom strip (logos); we draw photo, QR, the
+     * category ribbon with gender under it, big names, accessible areas and
+     * the centred club. Text colour = the template's banner colour.
+     */
+    private function frontEuroCup(array $e): string
+    {
+        $ink = $this->bannerColor();
+        $html = $this->fullImage($this->template->background);
+
+        if ($this->fields['photo']) {
+            $html .= $this->photo($e, 2.5, 31.5, 20, 25);
+        }
+
+        // Right column x 33 → 51.4, everything centred on it.
+        $colX = 33;
+        $colW = 18.4;
+        $isAthlete = $e['type'] === 'athlete';
+        if ($isAthlete && $this->fields['qr']) {
+            $qs = 16;
+            $html .= $this->qr($e, $colX + ($colW - $qs * $this->fs / $this->sx) / 2, 31.5, $qs);
+        }
+
+        // Ribbon: athlete category (U24, SENIOR A…), else the badge type label.
+        $style = $this->types[$e['type']] ?? ['label' => strtoupper($e['type']), 'color' => $ink];
+        $label = $isAthlete
+            ? ($this->fields['category'] && $e['category'] !== '' ? mb_strtoupper($e['category']) : $style['label'])
+            : $style['label'];
+        $ribbonColor = $isAthlete ? $ink : $style['color'];
+        $rw = $colW * $this->sx;
+        $rh = 5.6 * $this->sy;
+        $html .= $this->abs($colX * $this->sx, 50.8 * $this->sy, $rw, $rh,
+            $this->cell($label, 12 * $this->fs, $rh, '#FFFFFF', true, 'center', 1, null, $rw),
+            'background-color:' . $ribbonColor . ';');
+
+        if ($isAthlete && $this->fields['gender'] && $e['gender']) {
+            $html .= $this->text($colX, 56.7, $colW, 3, $e['gender'], 8, $ink, true, 'center');
+        }
+        $html .= $this->areaRow($e, $colX, 60, $colW);
+
+        // Names: first (and middle) names, then surname, large and in blue.
+        $html .= $this->text(2.5, 59.2, 29.5, 4, $e['first_name'], 13, $ink, false);
+        $html .= $this->text(2.5, 63.2, 29.5, 4, $e['last_name'], 13, $ink, true);
+        if ($this->fields['edbf_id'] && $e['edbf_id'] !== '') {
+            $html .= $this->text(2.5, 67.3, 29.5, 2.6, 'ID ' . $e['edbf_id'], 6.5, $ink, false);
+        }
+
+        $club = $this->fields['club'] ? ($e['club'] ?: $e['country']) : ($e['country'] ?: $e['club']);
+        $html .= $this->text(2.5, 70, 49, 4.5, mb_strtoupper((string) $club), 12, $ink, true, 'center');
 
         return $html;
     }

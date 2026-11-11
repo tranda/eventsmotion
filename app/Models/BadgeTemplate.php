@@ -8,6 +8,9 @@ class BadgeTemplate extends Model
 {
     public const SIZES = ['small', 'large'];
 
+    /** Front layouts: classic = EDBF Nationals, eurocup = Euro Cup 2023 style. */
+    public const LAYOUTS = ['classic', 'eurocup'];
+
     public const TYPES = ['athlete', 'coach', 'official', 'support', 'media', 'volunteer', 'vip'];
 
     /**
@@ -32,6 +35,7 @@ class BadgeTemplate extends Model
     protected $fillable = [
         'event_id',
         'size',
+        'layout',
         'banner_text',
         'banner_color',
         'footer_color',
@@ -115,6 +119,7 @@ class BadgeTemplate extends Model
         return [
             'event_id' => $event->id,
             'size' => $this->size ?: 'small',
+            'layout' => in_array($this->layout, self::LAYOUTS, true) ? $this->layout : 'classic',
             'banner_text' => $this->banner_text,
             'banner_text_default' => $event->name,
             'banner_color' => $this->banner_color ?: '#0072BC',
