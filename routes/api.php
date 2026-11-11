@@ -232,9 +232,11 @@ Route::middleware(['auth:sanctum', 'minlevel:1'])->group(function () {
     Route::delete('race-results/{race}/crews/{crew}/boat-checkins/{athlete}', [\App\Http\Controllers\API\BoatCheckinController::class, 'destroy'])->whereNumber('athlete');
 });
 // Event accreditation badges — Event Managers and up (access_level >= 2)
+Route::middleware(['auth:sanctum', 'minlevel:2'])->get('badge-templates', [\App\Http\Controllers\API\BadgeController::class, 'templates']);
 Route::middleware(['auth:sanctum', 'minlevel:2'])->prefix('events/{eventId}/badges')->whereNumber('eventId')->group(function () {
     Route::get('/', [\App\Http\Controllers\API\BadgeController::class, 'index']);
     Route::post('template', [\App\Http\Controllers\API\BadgeController::class, 'saveTemplate']);
+    Route::post('template/copy', [\App\Http\Controllers\API\BadgeController::class, 'copyTemplate']);
     Route::post('people', [\App\Http\Controllers\API\BadgeController::class, 'storePerson']);
     Route::post('people/{personId}', [\App\Http\Controllers\API\BadgeController::class, 'updatePerson'])->whereNumber('personId');
     Route::delete('people/{personId}', [\App\Http\Controllers\API\BadgeController::class, 'deletePerson'])->whereNumber('personId');

@@ -108,6 +108,68 @@ class BadgeController extends BaseController
         return response()->json(['template' => $tpl->toApi($event)]);
     }
 
+    /** Events that have a saved badge template (for "Copy from"). */
+    public function templates()
+    {
+        $rows = BadgeTemplate::with('event:id,name,year')->get()
+            ->filter(fn ($t) => $t->event !== null)
+            ->map(fn ($t) => [
+                'event_id' => $t->event_id,
+                'name' => $t->event->name,
+                'year' => $t->event->year,
+                'layout' => $t->layout ?? 'classic',
+                'size' => $t->size,
+            ])
+            ->sortByDesc('year')->values();
+
+        return response()->json(['templates' => $rows]);
+    }
+
+    /**
+     * Replace this event's template with a copy of another event's: all
+     * settings, plus its own copies of the logo and artwork files (so later
+     * edits to one event never touch the other). Hand-added people are not
+     * copied.
+     */
+    public function copyTemplate(Request $request, $eventId)
+    {
+        $event = Event::find($eventId);
+        $data = Validator::make($request->all(), ['from_event_id' => 'required|integer'])->validate();
+        $source = BadgeTemplate::where('event_id', (int) $data['from_event_id'])->first();
+        if (!$event || !$source) {
+            return $this->sendError('Event or source template not found', [], 404);
+        }
+        if ((int) $source->event_id === (int) $event->id) {
+            return $this->sendError('Pick a different event to copy from.', [], 422);
+        }
+
+        $tpl = BadgeTemplate::forEvent($event);
+        foreach (['size', 'banner_text', 'banner_color', 'footer_color', 'back_text', 'bleed_mm', 'fields', 'types', 'areas'] as $k) {
+            $tpl->$k = $source->$k;
+        }
+        if (\Illuminate\Support\Facades\Schema::hasColumn('badge_templates', 'layout')) {
+            $tpl->layout = $source->layout ?: 'classic';
+        }
+
+        foreach (['logo' => 'logo', 'background' => 'background', 'back_background' => 'backbackground'] as $slot => $prefix) {
+            $this->deleteFile($event->id, $tpl->$slot);
+            $tpl->$slot = null;
+            $from = $source->$slot ? BadgeService::storageDir((int) $source->event_id) . '/' . basename($source->$slot) : null;
+            if ($from && is_file($from)) {
+                $ext = pathinfo($from, PATHINFO_EXTENSION) === 'png' ? 'png' : 'jpg';
+                $name = $prefix . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
+                $dir = BadgeService::storageDir($event->id);
+                File::ensureDirectoryExists($dir);
+                File::copy($from, $dir . '/' . $name);
+                $tpl->$slot = $name;
+            }
+        }
+
+        $tpl->save();
+
+        return response()->json(['template' => $tpl->toApi($event)]);
+    }
+
     public function storePerson(Request $request, $eventId)
     {
         $event = Event::find($eventId);
