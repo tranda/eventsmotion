@@ -47,12 +47,14 @@ class BadgeRenderer
     private array $types;
     private array $areas;
     private float $ox = 0; // x offset of the side being drawn (spread mode)
+    private ?Mpdf $mpdf = null; // for measuring text widths
 
     public function __construct(
         private BadgeTemplate $template,
         private string $eventName,
         private string $size,
         private bool $spread = false,
+        private bool $trimLines = false, // previews: dashed line where the printer cuts
     ) {
         [$this->w, $this->h] = self::SIZES[$size] ?? self::SIZES['small'];
         $this->b = max(0, min(5, (int) $template->bleed_mm));
@@ -85,6 +87,7 @@ class BadgeRenderer
                 'default_font' => self::FONT,
                 'autoPageBreak' => false,
             ]);
+            $this->mpdf = $mpdf;
             $mpdf->SetTitle('Badges - ' . $this->eventName);
             $mpdf->WriteHTML('body { font-family: ' . self::FONT . '; margin: 0; padding: 0; }', HTMLParserMode::HEADER_CSS);
 
@@ -96,19 +99,31 @@ class BadgeRenderer
                     $mpdf->AddPage();
                 }
                 $this->ox = 0;
-                $mpdf->WriteHTML($this->front($e), HTMLParserMode::HTML_BODY);
+                $mpdf->WriteHTML($this->front($e) . $this->trimLine(), HTMLParserMode::HTML_BODY);
                 if ($this->spread) {
                     $this->ox = $this->w + 2 * $this->b;
                 } else {
                     $mpdf->AddPage();
                 }
-                $mpdf->WriteHTML($this->back($e), HTMLParserMode::HTML_BODY);
+                $mpdf->WriteHTML($this->back($e) . $this->trimLine(), HTMLParserMode::HTML_BODY);
             }
 
             return $mpdf->Output('', 'S');
         } finally {
             File::deleteDirectory($this->tmp);
         }
+    }
+
+    /** Dashed rectangle on the trim edge of the current side (previews with bleed only). */
+    private function trimLine(): string
+    {
+        if (!$this->trimLines || $this->b <= 0) {
+            return '';
+        }
+        return sprintf(
+            '<div style="position:absolute; left:%.2fmm; top:%.2fmm; width:%.2fmm; height:%.2fmm; border:0.25mm dashed #E6007E;"></div>',
+            $this->ox + $this->b, $this->b, $this->w, $this->h
+        );
     }
 
     // ---------------------------------------------------------------- layouts
@@ -242,9 +257,9 @@ class BadgeRenderer
         $labelH = 2.6 * $this->sy;
         $numH = 5.4 * $this->sy;
         return $this->abs($x * $this->sx, $y * $this->sy, $rw, $labelH,
-                $this->cell('ACCESSIBLE AREAS', 4.6 * $this->fs, $labelH, self::AREA_ON, false, 'center', 0))
+                $this->cell('ACCESSIBLE AREAS', 4.6 * $this->fs, $labelH, self::AREA_ON, false, 'center', 0, null, $rw - 2))
             . $this->abs($x * $this->sx, $y * $this->sy + $labelH, $rw, $numH,
-                $this->cell('', 11 * $this->fs, $numH, self::AREA_ON, true, 'center', 0, implode('&nbsp;', $nums)));
+                $this->cell('', 11 * $this->fs, $numH, self::AREA_ON, true, 'center', 0, implode('&nbsp;', $nums), $rw - 2));
     }
 
     /** Gender letter for athletes, the type label (S, VIP, MEDIA...) for everyone else. */
@@ -270,7 +285,7 @@ class BadgeRenderer
         $rw = $this->w - $rx;
         $rh = $h * $this->sy;
         $html = $this->abs($rx, $y * $this->sy, $rw, $rh,
-            $this->cell($label, $pt * $this->fs, $rh, '#FFFFFF', true, 'center', 1),
+            $this->cell($label, $pt * $this->fs, $rh, '#FFFFFF', true, 'center', 1, null, $rw),
             'background-color:' . $color . ';');
         if ($this->b > 0) {
             // starts 1 mm inside the ribbon so no hairline gap shows at the trim edge
@@ -285,17 +300,24 @@ class BadgeRenderer
         return $this->band($y, $h, $this->template->footer_color ?: '#F3F1DC', mb_strtoupper((string) $text), $pt, '#000000', true);
     }
 
-    /** Full-width coloured band with centred bold text; the footer runs into the bottom bleed. */
+    /**
+     * Full-width coloured band (into the side bleed; the footer also into the
+     * bottom bleed) with centred bold text. The text box is separate and stays
+     * inside the trimmed card with a safe margin, so long titles shrink to fit
+     * the card rather than the bleed.
+     */
     private function band(float $y, float $h, string $color, string $text, float $pt, string $ink, bool $toBottom = false): string
     {
         $ry = $y * $this->sy + $this->b;
         $rh = $h * $this->sy;
         $boxH = $toBottom ? $this->h + 2 * $this->b - $ry : $rh;
-        return sprintf(
-            '<div style="position:absolute; left:%.2fmm; top:%.2fmm; width:%.2fmm; height:%.2fmm; overflow:auto; background-color:%s;">%s</div>',
-            $this->ox, $ry, $this->w + 2 * $this->b, $boxH, $color,
-            $this->cell($text, $pt * $this->fs, $rh, $ink, true, 'center', 1 + $this->b)
+        $safe = 2.0; // mm from the trim edge
+        $bg = sprintf(
+            '<div style="position:absolute; left:%.2fmm; top:%.2fmm; width:%.2fmm; height:%.2fmm; background-color:%s;"></div>',
+            $this->ox, $ry, $this->w + 2 * $this->b, $boxH, $color
         );
+        return $bg . $this->abs($safe, $y * $this->sy, $this->w - 2 * $safe, $rh,
+            $this->cell($text, $pt * $this->fs, $rh, $ink, true, 'center', 0, null, $this->w - 2 * $safe));
     }
 
     private function fullImage(?string $name): string
@@ -378,7 +400,7 @@ class BadgeRenderer
     {
         $rh = $h * $this->sy;
         return $this->abs($x * $this->sx, $y * $this->sy, $w * $this->sx, $rh,
-            $this->cell($text, $pt * $this->fs, $rh, $color, $bold, $align, 0));
+            $this->cell($text, $pt * $this->fs, $rh, $color, $bold, $align, 0, null, $w * $this->sx));
     }
 
     /** Multi-line block (back side, already escaped HTML), shrunk to fit the box. */
@@ -392,13 +414,30 @@ class BadgeRenderer
      * One-cell table: vertical centring; with the block's overflow:auto mPDF
      * scales the content down when a long name does not fit.
      */
-    private function cell(string $text, float $pt, float $h, string $color, bool $bold, string $align, float $padX, ?string $rawHtml = null): string
+    private function cell(string $text, float $pt, float $h, string $color, bool $bold, string $align, float $padX, ?string $rawHtml = null, ?float $availW = null): string
     {
+        if ($availW !== null) {
+            $pt = $this->fitPt($rawHtml !== null ? html_entity_decode(strip_tags($rawHtml)) : $text, $pt, $bold, $availW - 2 * $padX);
+        }
         $t = $rawHtml ?? htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
         return '<table cellpadding="0" cellspacing="0" style="width:100%; border-collapse:collapse;"><tr>'
             . '<td style="height:' . $h . 'mm; vertical-align:middle; text-align:' . $align . '; padding:0 ' . $padX . 'mm;'
             . ' font-size:' . $pt . 'pt; color:' . $color . '; font-weight:' . ($bold ? 'bold' : 'normal') . '; white-space:nowrap;">'
             . $t . '</td></tr></table>';
+    }
+
+    /**
+     * Largest font size <= $pt at which $text fits $availMm, measured with the
+     * real font, so nothing runs past the trim even with bleed.
+     */
+    private function fitPt(string $text, float $pt, bool $bold, float $availMm): float
+    {
+        if (!$this->mpdf || $text === '' || $availMm <= 0) {
+            return $pt;
+        }
+        $this->mpdf->SetFont(self::FONT, $bold ? 'B' : '', $pt);
+        $w = $this->mpdf->GetStringWidth($text);
+        return $w > $availMm ? max(3.0, $pt * $availMm / $w * 0.98) : $pt;
     }
 
     /** Absolutely positioned block in real card mm (bleed added). */

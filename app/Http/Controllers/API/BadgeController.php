@@ -155,6 +155,7 @@ class BadgeController extends BaseController
             'size' => ['nullable', Rule::in(BadgeTemplate::SIZES)],
             'split' => ['nullable', Rule::in(['single', 'club'])],
             'sides' => ['nullable', Rule::in(['duplex', 'spread'])],
+            'trim_lines' => 'nullable|boolean', // previews: dashed trim line
             'keys' => 'nullable|string|max:20000',   // comma separated a12,p3
             'types' => 'nullable|string|max:200',    // comma separated
         ])->validate();
@@ -180,7 +181,8 @@ class BadgeController extends BaseController
         }
 
         $sides = $data['sides'] ?? 'duplex';
-        $renderer = new BadgeRenderer($tpl, (string) $event->name, $size, $sides === 'spread');
+        $renderer = new BadgeRenderer($tpl, (string) $event->name, $size, $sides === 'spread',
+            filter_var($data['trim_lines'] ?? false, FILTER_VALIDATE_BOOLEAN));
         $base = 'badges_' . $this->slug($event->name ?: 'event-' . $event->id) . '_' . $size . ($sides === 'spread' ? '_spread' : '');
 
         if ($split === 'single') {
