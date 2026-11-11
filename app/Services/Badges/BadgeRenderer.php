@@ -30,7 +30,7 @@ class BadgeRenderer
     private const GRID_W = 54.0;
     private const GRID_H = 85.6;
 
-    private const GENDER_COLORS = ['F' => '#E30613', 'O' => '#009640'];
+    private const GENDER_COLORS = ['FEMALE' => '#E30613', 'MALE' => '#009640'];
     private const CATEGORY_COLOR = '#B3121A';
     private const AREA_ON = '#0D2B6B';
     private const AREA_OFF = '#C9CEE6';
@@ -255,15 +255,23 @@ class BadgeRenderer
         return $this->tag($x, $y, $h, $style['label'], $style['color'], $pt);
     }
 
-    /** Coloured strip from $x to the right card edge (and into the bleed). */
+    /**
+     * Coloured ribbon from $x to the right card edge, label centred on the
+     * visible part; a plain strip continues it into the bleed.
+     */
     private function tag(float $x, float $y, float $h, string $label, string $color, float $pt): string
     {
         $rx = $x * $this->sx;
-        $rw = $this->w - $rx + $this->b;
+        $rw = $this->w - $rx;
         $rh = $h * $this->sy;
-        return $this->abs($rx, $y * $this->sy, $rw, $rh,
-            $this->cell($label, $pt * $this->fs, $rh, '#FFFFFF', true, 'right', 2.5 * $this->sx + $this->b),
+        $html = $this->abs($rx, $y * $this->sy, $rw, $rh,
+            $this->cell($label, $pt * $this->fs, $rh, '#FFFFFF', true, 'center', 1),
             'background-color:' . $color . ';');
+        if ($this->b > 0) {
+            // starts 1 mm inside the ribbon so no hairline gap shows at the trim edge
+            $html .= $this->abs($this->w - 1, $y * $this->sy, $this->b + 1, $rh, '', 'background-color:' . $color . ';');
+        }
+        return $html;
     }
 
     private function footer(array $e, float $y, float $h, float $pt): string

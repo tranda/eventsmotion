@@ -21,7 +21,7 @@ use Illuminate\Support\Facades\DB;
  */
 class BadgeService
 {
-    public const GENDER_CODES = ['Female' => 'F', 'Male' => 'O'];
+    public const GENDER_CODES = ['Female' => 'FEMALE', 'Male' => 'MALE'];
 
     /** Folder for this event's uploaded badge files (logo, background, photos). */
     public static function storageDir(int $eventId): string

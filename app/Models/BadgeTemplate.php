@@ -23,7 +23,7 @@ class BadgeTemplate extends Model
         'athlete' => ['label' => 'ATHLETE', 'color' => '#0072BC'],
         'coach' => ['label' => 'COACH', 'color' => '#2E7D32'],
         'official' => ['label' => 'OFFICIAL', 'color' => '#6A1B9A'],
-        'support' => ['label' => 'S', 'color' => '#333333'],
+        'support' => ['label' => 'SUPPORTER', 'color' => '#333333'],
         'media' => ['label' => 'MEDIA', 'color' => '#EF6C00'],
         'volunteer' => ['label' => 'VOLUNTEER', 'color' => '#00897B'],
         'vip' => ['label' => 'VIP', 'color' => '#B8860B'],
