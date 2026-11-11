@@ -20,7 +20,7 @@ return new class extends Migration
 {
     public function up()
     {
-        Schema::create('badge_templates', function (Blueprint $table) {
+        if (!Schema::hasTable('badge_templates')) Schema::create('badge_templates', function (Blueprint $table) {
             $table->id();
             $table->foreignId('event_id')->unique()->constrained('events')->onDelete('cascade');
             $table->string('size', 10)->default('small');      // small | large
@@ -32,13 +32,15 @@ return new class extends Migration
             $table->string('back_background')->nullable();      // artwork for the back side
             $table->text('back_text')->nullable();              // free text on the back (venue, phone numbers...)
             $table->unsignedTinyInteger('bleed_mm')->default(0);
-            $table->json('fields')->nullable();                 // which fields show
-            $table->json('types')->nullable();                  // per-type label, colour, accessible areas
-            $table->json('areas')->nullable();                  // [{no: 1, name: "Boat marshalling"}, ...]
+            // JSON stored as longText: the production MariaDB has no json type
+            // (same as events.color_map). The model casts them to arrays.
+            $table->longText('fields')->nullable();             // which fields show
+            $table->longText('types')->nullable();              // per-type label, colour, accessible areas
+            $table->longText('areas')->nullable();              // [{no: 1, name: "Boat marshalling"}, ...]
             $table->timestamps();
         });
 
-        Schema::create('badge_people', function (Blueprint $table) {
+        if (!Schema::hasTable('badge_people')) Schema::create('badge_people', function (Blueprint $table) {
             $table->id();
             $table->foreignId('event_id')->constrained('events')->onDelete('cascade');
             $table->string('type', 20);                         // volunteer | vip | media | coach | official | support
