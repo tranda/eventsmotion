@@ -108,6 +108,47 @@ class BadgeController extends BaseController
         return response()->json(['template' => $tpl->toApi($event)]);
     }
 
+    /**
+     * Designer template: front + back of this event's layout at print size
+     * with bleed, no artwork, and placeholders where the app prints data
+     * (photo, QR, logo, names, club, category...). Pink = bleed, dashed pink
+     * = trim, dotted blue = 2 mm safe area.
+     */
+    public function guide(Request $request, $eventId)
+    {
+        $event = Event::find($eventId);
+        if (!$event) {
+            return $this->sendError('Event not found', [], 404);
+        }
+        $data = Validator::make($request->query(), [
+            'size' => ['nullable', Rule::in(BadgeTemplate::SIZES)],
+        ])->validate();
+
+        $tpl = BadgeTemplate::forEvent($event);
+        $size = $data['size'] ?? ($tpl->size ?: 'small');
+        $areas = $tpl->areaList();
+        if (!$areas) {
+            // Show where the areas row goes even before areas are defined.
+            $tpl->areas = [['no' => 1, 'name' => 'Area 1'], ['no' => 2, 'name' => 'Area 2'], ['no' => 3, 'name' => 'Area 3']];
+        }
+        $sample = [
+            'key' => 'guide', 'source' => 'athlete', 'id' => 0, 'type' => 'athlete',
+            'first_name' => 'First Name', 'last_name' => 'Last Name',
+            'club' => 'Club Name', 'country' => 'Country', 'group' => 'Club Name',
+            'gender' => 'FEMALE', 'category' => 'Category', 'edbf_id' => '00000',
+            'photo_path' => null, 'qr' => fn () => 'guide',
+        ];
+        if (!trim((string) $tpl->back_text)) {
+            $tpl->back_text = "Back text\n(venue, dates, phone numbers)";
+        }
+
+        $layout = ($tpl->layout ?? 'classic') === 'eurocup' ? 'eurocup' : 'classic';
+        $pdf = (new BadgeRenderer($tpl, (string) $event->name, $size, false, false, true))->pdf([$sample]);
+        $name = 'badge-design-template_' . $this->slug($event->name ?: 'event') . '_' . $layout . '_' . $size . '.pdf';
+
+        return $this->send($pdf, $name, 'application/pdf');
+    }
+
     /** Events that have a saved badge template (for "Copy from"). */
     public function templates()
     {

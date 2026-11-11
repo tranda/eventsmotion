@@ -237,6 +237,7 @@ Route::middleware(['auth:sanctum', 'minlevel:2'])->prefix('events/{eventId}/badg
     Route::get('/', [\App\Http\Controllers\API\BadgeController::class, 'index']);
     Route::post('template', [\App\Http\Controllers\API\BadgeController::class, 'saveTemplate']);
     Route::post('template/copy', [\App\Http\Controllers\API\BadgeController::class, 'copyTemplate']);
+    Route::get('template/guide', [\App\Http\Controllers\API\BadgeController::class, 'guide']);
     Route::post('people', [\App\Http\Controllers\API\BadgeController::class, 'storePerson']);
     Route::post('people/{personId}', [\App\Http\Controllers\API\BadgeController::class, 'updatePerson'])->whereNumber('personId');
     Route::delete('people/{personId}', [\App\Http\Controllers\API\BadgeController::class, 'deletePerson'])->whereNumber('personId');

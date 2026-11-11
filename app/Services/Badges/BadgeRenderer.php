@@ -55,6 +55,7 @@ class BadgeRenderer
         private string $size,
         private bool $spread = false,
         private bool $trimLines = false, // previews: dashed line where the printer cuts
+        private bool $guide = false,     // designer template: placeholders, no artwork, bleed/trim/safe marks
     ) {
         [$this->w, $this->h] = self::SIZES[$size] ?? self::SIZES['small'];
         $this->b = max(0, min(5, (int) $template->bleed_mm));
@@ -99,13 +100,13 @@ class BadgeRenderer
                     $mpdf->AddPage();
                 }
                 $this->ox = 0;
-                $mpdf->WriteHTML($this->front($e) . $this->trimLine(), HTMLParserMode::HTML_BODY);
+                $mpdf->WriteHTML($this->guideBase() . $this->front($e) . $this->trimLine() . $this->guideLines('FRONT'), HTMLParserMode::HTML_BODY);
                 if ($this->spread) {
                     $this->ox = $this->w + 2 * $this->b;
                 } else {
                     $mpdf->AddPage();
                 }
-                $mpdf->WriteHTML($this->back($e) . $this->trimLine(), HTMLParserMode::HTML_BODY);
+                $mpdf->WriteHTML($this->guideBase() . $this->back($e) . $this->trimLine() . $this->guideLines('BACK'), HTMLParserMode::HTML_BODY);
             }
 
             return $mpdf->Output('', 'S');
@@ -124,6 +125,51 @@ class BadgeRenderer
             '<div style="position:absolute; left:%.2fmm; top:%.2fmm; width:%.2fmm; height:%.2fmm; border:0.25mm dashed #E6007E;"></div>',
             $this->ox + $this->b, $this->b, $this->w, $this->h
         );
+    }
+
+    // ------------------------------------------------------- designer guide
+
+    /** Guide: bleed area tinted pink, card area white. */
+    private function guideBase(): string
+    {
+        if (!$this->guide) {
+            return '';
+        }
+        return sprintf('<div style="position:absolute; left:%.2fmm; top:0; width:%.2fmm; height:%.2fmm; background-color:#FCE4EF;"></div>',
+                $this->ox, $this->w + 2 * $this->b, $this->h + 2 * $this->b)
+            . sprintf('<div style="position:absolute; left:%.2fmm; top:%.2fmm; width:%.2fmm; height:%.2fmm; background-color:#FFFFFF;"></div>',
+                $this->ox + $this->b, $this->b, $this->w, $this->h);
+    }
+
+    /** Guide: trim line (pink dashed), safe area 2 mm inside (blue dotted), side label. */
+    private function guideLines(string $side): string
+    {
+        if (!$this->guide) {
+            return '';
+        }
+        $safe = 2.0;
+        $html = sprintf('<div style="position:absolute; left:%.2fmm; top:%.2fmm; width:%.2fmm; height:%.2fmm; border:0.25mm dashed #E6007E;"></div>',
+            $this->ox + $this->b, $this->b, $this->w, $this->h);
+        $html .= sprintf('<div style="position:absolute; left:%.2fmm; top:%.2fmm; width:%.2fmm; height:%.2fmm; border:0.2mm dotted #1E88E5;"></div>',
+            $this->ox + $this->b + $safe, $this->b + $safe, $this->w - 2 * $safe, $this->h - 2 * $safe);
+        $label = $side . ' · ' . rtrim(rtrim(number_format($this->w, 1), '0'), '.') . ' × ' . rtrim(rtrim(number_format($this->h, 1), '0'), '.') . ' mm'
+            . ($this->b > 0 ? ' + ' . $this->b . ' mm bleed' : '');
+        // Label in the top bleed strip (outside the card) when there is room.
+        if ($this->b >= 2) {
+            $html .= $this->abs(0, -$this->b + 0.3, $this->w, $this->b - 0.6,
+                $this->cell($label, 5, $this->b - 0.6, '#E6007E', true, 'center', 0, null, $this->w - 2));
+        }
+        return $html;
+    }
+
+    /** Guide: dashed box with a label (photo, QR, logo). */
+    private function placeholder(float $rx, float $ry, float $rw, float $rh, string $label): string
+    {
+        $dims = round($rw, 1) . ' × ' . round($rh, 1) . ' mm';
+        return $this->abs($rx, $ry, $rw, $rh,
+            '<div style="font-size:' . max(4, min(8, $rw * 0.9)) . 'pt; color:#555555; text-align:center; font-weight:bold; padding-top:' . max(0.5, $rh / 2 - 3) . 'mm;">'
+            . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '<br /><span style="font-weight:normal; font-size:' . max(3.5, min(6, $rw * 0.6)) . 'pt;">' . $dims . '</span></div>',
+            'background-color:#ECEFF1; border:0.25mm dashed #607D8B;');
     }
 
     // ---------------------------------------------------------------- layouts
@@ -225,7 +271,8 @@ class BadgeRenderer
      */
     private function back(array $e): string
     {
-        $artwork = $this->assetPath($this->template->back_background) !== null;
+        // Designer guide shows the "with artwork" back: only the overlaid data.
+        $artwork = $this->guide || $this->assetPath($this->template->back_background) !== null;
         $html = $this->fullImage($this->template->back_background);
 
         if (!$artwork) {
@@ -292,6 +339,9 @@ class BadgeRenderer
             file_put_contents($file, QrCode::format('svg')->margin(0)->errorCorrection('M')->generate(($e['qr'])()));
         }
         $s = $size * $this->fs;
+        if ($this->guide) {
+            return $this->placeholder($x * $this->sx, $y * $this->sy, $s, $s, 'QR');
+        }
         return $this->abs($x * $this->sx, $y * $this->sy, $s, $s, '<img src="' . $file . '" style="width:' . $s . 'mm;height:' . $s . 'mm" />');
     }
 
@@ -379,6 +429,9 @@ class BadgeRenderer
 
     private function fullImage(?string $name): string
     {
+        if ($this->guide) {
+            return '';
+        }
         $path = $this->assetPath($name);
         if (!$path) {
             return '';
@@ -391,6 +444,9 @@ class BadgeRenderer
 
     private function logo(float $x, float $y, float $w, float $h): string
     {
+        if ($this->guide) {
+            return $this->placeholder($x * $this->sx, $y * $this->sy, $w * $this->sx, $h * $this->sy, 'LOGO');
+        }
         $path = $this->assetPath($this->template->logo);
         if (!$path) {
             return '';
@@ -410,6 +466,9 @@ class BadgeRenderer
     {
         $rw = $w * $this->sx;
         $rh = $h * $this->sy;
+        if ($this->guide) {
+            return $this->placeholder($x * $this->sx, $y * $this->sy, $rw, $rh, 'PHOTO');
+        }
         $file = $e['photo_path'] ? $this->cropPhoto($e['photo_path'], $e['key'], $rw / $rh) : null;
         if ($file) {
             return $this->abs($x * $this->sx, $y * $this->sy, $rw, $rh, '<img src="' . $file . '" style="width:' . $rw . 'mm;height:' . $rh . 'mm" />');
