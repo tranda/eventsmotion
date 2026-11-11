@@ -248,11 +248,11 @@ class BadgeRenderer
         $nw = $withQr ? 31 : 48;
         $align = $withQr ? 'left' : 'center';
         if ($this->fields['back_name']) {
-            $html .= $this->text($nx, $y, $nw, 5.5, mb_strtoupper($e['last_name']), 11, '#000000', true, $align);
-            $html .= $this->text($nx, $y + 5.5, $nw, 4, mb_strtoupper($e['first_name']), 8, '#000000', false, $align);
+            $html .= $this->text($nx, $y, $nw, 5.5, mb_strtoupper($e['last_name']), 11, $this->backInk(), true, $align);
+            $html .= $this->text($nx, $y + 5.5, $nw, 4, mb_strtoupper($e['first_name']), 8, $this->backInk(), false, $align);
             $style = $this->types[$e['type']] ?? ['label' => strtoupper($e['type'])];
             $sub = $e['type'] === 'athlete' ? ($e['category'] ?: $style['label']) : $style['label'];
-            $html .= $this->text($nx, $y + 9.5, $nw, 3.5, mb_strtoupper($sub), 7, self::CATEGORY_COLOR, true, $align);
+            $html .= $this->text($nx, $y + 9.5, $nw, 3.5, mb_strtoupper($sub), 7, $this->isEuroCup() ? $this->bannerColor() : self::CATEGORY_COLOR, true, $align);
         }
         if ($withQr) {
             $y += 16 * $this->fs / $this->sy + 3;
@@ -264,9 +264,9 @@ class BadgeRenderer
         if ($this->fields['back_areas'] && $this->areas) {
             $lines = [];
             foreach ($this->areas as $a) {
-                $lines[] = '<b style="color:' . self::AREA_ON . '">' . $a['no'] . '</b>&nbsp;' . htmlspecialchars($a['name'], ENT_QUOTES, 'UTF-8');
+                $lines[] = '<b style="color:' . ($this->isEuroCup() ? $this->bannerColor() : self::AREA_ON) . '">' . $a['no'] . '</b>&nbsp;' . htmlspecialchars($a['name'], ENT_QUOTES, 'UTF-8');
             }
-            $parts[] = '<div style="font-weight:bold; color:' . self::AREA_ON . ';">AREAS</div>' . implode('<br />', $lines);
+            $parts[] = '<div style="font-weight:bold; color:' . ($this->isEuroCup() ? $this->bannerColor() : self::AREA_ON) . ';">AREAS</div>' . implode('<br />', $lines);
         }
         $text = trim((string) $this->template->back_text);
         if ($text !== '') {
@@ -464,7 +464,18 @@ class BadgeRenderer
     private function paragraph(float $x, float $y, float $w, float $h, string $t, float $pt): string
     {
         return $this->abs($x * $this->sx, $y * $this->sy, $w * $this->sx, $h * $this->sy,
-            '<div style="font-size:' . ($pt * $this->fs) . 'pt; line-height:1.3; color:#000000; text-align:center;">' . $t . '</div>');
+            '<div style="font-size:' . ($pt * $this->fs) . 'pt; line-height:1.3; color:' . $this->backInk() . '; text-align:center;">' . $t . '</div>');
+    }
+
+    private function isEuroCup(): bool
+    {
+        return ($this->template->layout ?? 'classic') === 'eurocup';
+    }
+
+    /** Back-side text colour: event blue on Euro Cup badges, black on Classic. */
+    private function backInk(): string
+    {
+        return $this->isEuroCup() ? $this->bannerColor() : '#000000';
     }
 
     /**
